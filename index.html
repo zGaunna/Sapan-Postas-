@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#071722">
+  <meta name="description" content="Gece limanında halatla savrul, üç paketi yetiştir, fener sönmeden iskeleye var.">
+  <title>Sapan Postası</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <a class="wordmark" href="#" aria-label="Sapan Postası ana menü">
+        <span class="mark" aria-hidden="true"><span></span></span>
+        <span>SAPAN <b>POSTASI</b></span>
+      </a>
+      <div class="top-actions">
+        <span class="edition">GECE VARDİYASI <i></i></span>
+        <button id="sound-toggle" class="icon-button" type="button" aria-label="Sesi aç" title="Sesi aç">♪</button>
+      </div>
+    </header>
+
+    <section class="game-frame" aria-label="Sapan Postası oyun alanı">
+      <canvas id="game" aria-label="Gece limanında halatla halkalara tutunup ip uzunluğunu ayarlayarak ilerlediğin oyun alanı"></canvas>
+
+      <section id="hud" class="hud" hidden aria-live="polite">
+        <div class="hud-left">
+          <div class="hud-stat score-stat"><small>PUAN</small><strong id="score">00000</strong></div>
+          <div class="hud-stat"><small>POSTA</small><strong id="seals">0 <span>/ 3</span></strong></div>
+          <div id="rope-readout" class="hud-stat rope-readout" hidden aria-live="polite"><small>HALAT</small><strong><b id="rope-length">0</b><span> px</span></strong><div class="rope-meter" aria-hidden="true"><i id="rope-fill"></i></div></div>
+        </div>
+        <div class="hud-center"><span class="route-label">FENER İSKELESİ</span><div class="route-track"><span id="route-fill"></span><i id="route-marker"></i></div><small id="route-clock" class="route-clock">1:55 KALAN</small></div>
+        <div class="hud-right"><button id="preview-toggle" class="preview-toggle" type="button" aria-label="Uçuş önizlemesi" aria-pressed="true" title="Uçuş yolunu gizle (G)" hidden>YOL <kbd>G</kbd></button><div id="lives" class="lives" aria-label="3 can"><i></i><i></i><i></i></div><button id="pause-button" class="pause-button" type="button" aria-label="Oyunu duraklat">Ⅱ</button></div>
+        <div id="release-cue" class="release-cue" hidden>ŞİMDİ BIRAK · TEMİZ FIRLATMA</div>
+        <div id="tutorial-cue" class="tutorial-cue" hidden>
+          <div class="tutorial-head"><span>İLK TESLİMAT</span><b id="tutorial-step">1 / 3</b></div>
+          <p id="tutorial-copy" aria-live="polite"></p>
+          <button id="tutorial-skip" type="button" aria-label="Öğreticiyi atla">ATLA</button>
+        </div>
+        <div id="hint" class="hint">Halkaya yaklaşınca <kbd>SPACE</kbd> basılı tut</div>
+        <div id="combo" class="combo" aria-live="polite"></div>
+      </section>
+
+      <div id="touch-controls" class="touch-controls" hidden aria-label="Dokunmatik kontroller">
+        <div class="steer-pad">
+          <button type="button" data-steer="-1" aria-label="Sola yönel">‹</button>
+          <button type="button" data-steer="1" aria-label="Sağa yönel">›</button>
+        </div>
+        <button id="tether-touch" class="tether-touch" type="button" aria-label="Basılı tut: kancaya bağlan; dikey sürükle: ipi ayarla">TUTUN</button>
+      </div>
+
+      <section id="start-screen" class="overlay">
+        <div class="start-card">
+          <div class="eyebrow"><span class="eyebrow-dot"></span> KIYI HATTI · 03:17</div>
+          <div class="title-row"><div><h1>Sapan<br><em>Postası</em></h1><p class="story">Fener sönmeden üç mühürlü paketi yetiştirmen gerekiyor.</p></div><div class="title-lantern" aria-hidden="true"><span></span></div></div>
+          <div class="control-strip">
+            <div><kbd>SPACE</kbd><span>basılı tut: halkaya tutun<br>bırak: ileri fırlat</span></div>
+            <div><kbd>←</kbd><kbd>→</kbd><span>havada yön ver</span></div>
+            <div><kbd>↑</kbd><kbd>↓</kbd><span>tutunurken ipi kısalt / uzat (W / S)</span></div>
+            <div><kbd>ESC</kbd><span>duraklat</span></div>
+          </div>
+          <div class="start-actions"><button id="start-button" class="primary-button" type="button">Vardiyaya başla <span aria-hidden="true">↗</span></button><div class="best-score">EN İYİ <b id="best-start">0</b></div></div>
+          <section class="practice" aria-labelledby="practice-title">
+            <h2 id="practice-title">Antrenman</h2>
+            <div class="practice-options">
+              <button type="button" data-practice-start="0"><kbd>1</kbd> Başlangıç</button>
+              <button type="button" data-practice-start="1"><kbd>2</kbd> Orta iskele</button>
+              <button type="button" data-practice-start="2"><kbd>3</kbd> Fener hattı</button>
+            </div>
+            <p>Süresiz · Sınırsız can · R: son iskeleye dön · G: uçuş yolu · Rekor kaydı yok</p>
+          </section>
+          <p class="footnote">Normal vardiya yaklaşık 2 dakika sürer · Rekorun bu tarayıcıda saklanır</p>
+        </div>
+        <div class="side-note"><span>DALGAKIRAN</span><b>05</b><span>SON TEKNE ÇIKTI</span></div>
+      </section>
+
+      <section id="pause-screen" class="overlay overlay-dim" hidden>
+        <div class="dialog-card compact-card">
+          <div class="eyebrow">BİR NEFES AL</div><h2>Duraklatıldı</h2><p>Fener hâlâ yanıyor.</p>
+          <div class="dialog-actions"><button id="resume-button" class="primary-button" type="button">Devam et <span>↗</span></button><button id="restart-button" class="secondary-button" type="button">Baştan başla</button><button id="menu-button" class="text-button" type="button">Ana menü</button></div>
+        </div>
+      </section>
+
+      <section id="result-screen" class="overlay overlay-dim" hidden>
+        <div class="dialog-card compact-card result-card">
+          <div id="result-kicker" class="eyebrow">TESLİMAT TAMAM</div><h2 id="result-title">Fener söndürülmedi.</h2><p id="result-copy">Son tekne de kıyıya vardı.</p>
+          <div class="result-score"><small id="result-score-label">BU VARDİYA</small><strong id="final-score">0</strong><span id="new-best" hidden>YENİ REKOR</span></div>
+          <div class="result-stats"><span>Paket <b id="final-seals">0/3</b></span><span>En iyi <b id="best-result">0</b></span></div>
+          <div class="dialog-actions"><button id="replay-button" class="primary-button" type="button">Yeniden oyna <span>↗</span></button><button id="result-menu-button" class="text-button" type="button">Ana menü</button></div>
+        </div>
+      </section>
+    </section>
+
+    <footer class="bottomline"><span>ÇEVRİMDIŞI GECE MACERASI</span><span>YEREL KAYIT <i></i></span></footer>
+  </main>
+  <script src="game.js"></script>
+</body>
+</html>
