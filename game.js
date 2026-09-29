@@ -15,6 +15,7 @@
   const SLING = { baseImpulse: 40, bonusImpulse: 60, seconds: 1.2, vxCap: 400 };
   const FRAGILE_HOLD_SECONDS = 1.55;
   const WINCH_REEL_SPEED = 135;
+  const BEST_TIME_KEY = "sapan-postasi-best-time";
   const canvas = document.querySelector("#game");
   const ctx = canvas.getContext("2d", { alpha: false });
   const ui = {
@@ -37,6 +38,10 @@
     resultKicker: document.querySelector("#result-kicker"), resultTitle: document.querySelector("#result-title"),
     resultCopy: document.querySelector("#result-copy"), finalScore: document.querySelector("#final-score"),
     resultScoreLabel: document.querySelector("#result-score-label"),
+    finalHits: document.querySelector("#final-hits"), finalThrows: document.querySelector("#final-throws"),
+    runTime: document.querySelector("#run-time"), finalTime: document.querySelector("#final-time"),
+    bestTimeStart: document.querySelector("#best-time-start"), bestTimeResult: document.querySelector("#best-time-result"),
+    newTimeBest: document.querySelector("#new-time-best"), splits: document.querySelector("#result-splits"),
     finalSeals: document.querySelector("#final-seals"), newBest: document.querySelector("#new-best"),
     sound: document.querySelector("#sound-toggle"), pauseButton: document.querySelector("#pause-button"),
     tetherTouch: document.querySelector("#tether-touch"),
@@ -46,7 +51,7 @@
   const anchorHeights = [305, 265, 370, 295, 405, 300, 345, 250, 390, 310, 420, 285, 360];
   const fragileAnchorIds = new Set([6, 10, 18]);
   const winchAnchorIds = new Set([13, 24]);
-  const anchors = Array.from({ length: 26 }, (_, i) => ({
+  const anchors = Array.from({ length: 27 }, (_, i) => ({
     id: i, x: 440 + i * 650, y: anchorHeights[i % anchorHeights.length],
     type: fragileAnchorIds.has(i) ? "fragile" : winchAnchorIds.has(i) ? "winch" : "normal",
     visited: false, fragileElapsed: 0
@@ -80,6 +85,8 @@
   let state = "menu";
   let cameraX = 0;
   let elapsed = 0;
+  let runTime = 0;
+  let splitTimes = [];
   let remaining = SHIFT_SECONDS;
   let lastFrame = 0;
   let hudClock = 0;
@@ -91,6 +98,8 @@
   let sealCount = 0;
   let checkpointX = 150;
   let invulnerable = 0;
+  let recoveryReady = false;
+  const recoveryBlockedKeys = new Set();
   let tetherHeld = false;
   let tetherAnchor = null;
   let ropeLength = 0;
@@ -99,6 +108,7 @@
   let fragileWarningPlayed = false;
   let practiceIndex = -1;
   let previewOn = true;
+  let runStats = { hits: 0, cleanThrows: 0, ringBreaks: 0, segments: [0, 0, 0], hitLog: [] };
   let tutorialActive = false;
   let tutorialStep = 0;
   let tutorialTimer = 0;
@@ -111,11 +121,55 @@
   const player = { x: 165, y: 420, vx: 155, vy: -160, radius: 17 };
 
   function readBest() {
-    try { return Math.max(0, Number(localStorage.getItem("sapan-postasi-best")) || 0); }
+    try {
+      const value = Number(localStorage.getItem("sapan-postasi-best"));
+      return Number.isFinite(value) && value > 0 ? value : 0;
+    }
     catch { return 0; }
   }
 
   let best = readBest();
+  let bestTime = null;
+  try { bestTime = readBestRunTime(localStorage); } catch { /* Storage can be blocked. */ }
+
+  // Süre yardımcıları Sonnet 5.5 ile hazırlandı; depolama hataları oyunu durdurmaz.
+  function formatRunTime(seconds) {
+    if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0) return "—";
+    const total = Math.floor(seconds * 100 + 1e-9);
+    const minutes = Math.floor(total / 6000);
+    const rest = total % 6000;
+    const s = Math.floor(rest / 100);
+    const cs = rest % 100;
+    return minutes + ":" + String(s).padStart(2, "0") + "." + String(cs).padStart(2, "0");
+  }
+
+  function parseBestSeconds(raw) {
+    let value = null;
+    if (typeof raw === "number") value = raw;
+    else if (typeof raw === "string" && /^\d+(?:\.\d+)?$/.test(raw)) value = Number(raw);
+    return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+  }
+
+  function readBestRunTime(storage) {
+    try {
+      if (!storage || typeof storage.getItem !== "function") return null;
+      return parseBestSeconds(storage.getItem(BEST_TIME_KEY));
+    } catch { return null; }
+  }
+
+  function saveBestRunTime(storage, seconds) {
+    const previous = readBestRunTime(storage);
+    const unchanged = { bestTime: previous, improved: false, saved: false };
+    if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) return unchanged;
+    const text = seconds.toFixed(6);
+    const candidate = parseBestSeconds(text);
+    if (candidate === null || (previous !== null && candidate >= previous)) return unchanged;
+    try {
+      if (!storage || typeof storage.setItem !== "function") return unchanged;
+      storage.setItem(BEST_TIME_KEY, text);
+    } catch { return unchanged; }
+    return { bestTime: candidate, improved: true, saved: true };
+  }
 
   function hasCompletedTutorial() {
     try { return localStorage.getItem("sapan-postasi-tutorial") === "done"; }
@@ -201,15 +255,17 @@
       for (const seal of seals) if (seal.x < startX) seal.collected = true;
     }
     nearMissed = new Set();
+    runStats = { hits: 0, cleanThrows: 0, ringBreaks: 0, segments: [0, 0, 0], hitLog: [] };
     player.x = practiceIndex > 0 ? startX : 165;
     player.y = practiceIndex > 0 ? 430 : 420;
     player.vx = 155; player.vy = -160;
     player.radius = 17;
     cameraX = Math.max(0, player.x - W * 0.36);
-    elapsed = 0; remaining = SHIFT_SECONDS; hudClock = 0;
+    elapsed = 0; runTime = 0; splitTimes = []; remaining = SHIFT_SECONDS; hudClock = 0;
     lives = 3; score = 0; sealCount = seals.filter(seal => seal.collected).length; combo = 0;
     boostTime = 0;
     checkpointX = startX; invulnerable = 0;
+    recoveryReady = false; recoveryBlockedKeys.clear();
     tetherHeld = false; tetherAnchor = null; ropeLength = 0; ropeLengthRate = 0;
     tetherTime = 0; fragileWarningPlayed = false;
     tutorialActive = practiceIndex < 0 && !hasCompletedTutorial(); tutorialStep = 0; tutorialTimer = 0;
@@ -234,7 +290,7 @@
     setPanels();
   }
 
-  function finishRun(won) {
+  function finishRun(won, reason = null) {
     if (state !== "playing") return;
     releaseTether({ award: false, consumeAnchor: false });
     boostTime = 0;
@@ -245,23 +301,48 @@
     ui.resultScoreLabel.textContent = practiceIndex >= 0 ? "BU ANTRENMAN" : "BU VARDİYA";
     ui.finalScore.textContent = formatScore(score);
     ui.finalSeals.textContent = `${sealCount}/3`;
+    ui.finalHits.textContent = String(runStats.hits);
+    ui.finalThrows.textContent = String(runStats.cleanThrows);
+    let timeRecord = false;
+    if (won) splitTimes.push({ name: "Fener iskelesi", at: runTime });
+    if (won && practiceIndex < 0) {
+      try {
+        const result = saveBestRunTime(localStorage, runTime);
+        bestTime = result.bestTime;
+        timeRecord = result.improved;
+      } catch { /* Record persistence is optional. */ }
+    }
+    ui.finalTime.textContent = formatRunTime(runTime);
+    ui.bestTimeStart.textContent = formatRunTime(bestTime);
+    ui.bestTimeResult.textContent = formatRunTime(bestTime);
+    ui.newTimeBest.hidden = !timeRecord;
+    let previousSplit = 0;
+    ui.splits.innerHTML = splitTimes.map(split => {
+      const displayedSplit = Math.floor(split.at * 100 + 1e-9);
+      const duration = (displayedSplit - previousSplit) / 100;
+      previousSplit = displayedSplit;
+      return `<li><span>${split.name}</span><b>${formatRunTime(split.at)}</b><small>+${formatRunTime(duration)}</small></li>`;
+    }).join("");
+    ui.splits.hidden = splitTimes.length === 0;
     ui.bestResult.textContent = formatScore(best);
     ui.bestStart.textContent = formatScore(best);
     ui.newBest.hidden = practiceIndex >= 0 || score <= previousBest || score === 0;
     if (won) {
-      ui.resultKicker.textContent = practiceIndex >= 0 ? "ANTRENMAN TAMAM" : "TESLİMAT TAMAM";
+      ui.resultKicker.textContent = practiceIndex >= 0 ? "ANTRENMAN TAMAM" : sealCount === 3 ? "TESLİMAT TAMAM" : "FENERE VARDIN";
       ui.resultTitle.textContent = practiceIndex >= 0 ? "Parkuru geçtin." : "Fener sönmeden yetiştin.";
       ui.resultCopy.textContent = practiceIndex >= 0
         ? "Hazırsan vardiyada süreye karşı deneyebilirsin."
         : sealCount === 3
           ? "Üç mührü de teslim ettin. Bu gecelik işin bitti."
-          : "Paketleri fener iskelesine ulaştırdın. Bu gecelik işin bitti.";
+          : `${sealCount}/3 mühür topladın. Üçünü de toplamak için bir sonraki vardiyada farklı bir rota deneyebilirsin.`;
       playTone(740, 0.15, "triangle");
       playTone(980, 0.22, "sine", 0.13);
     } else {
       ui.resultKicker.textContent = "VARDİYA BİTTİ";
       ui.resultTitle.textContent = "Bu gece olmadı.";
-      ui.resultCopy.textContent = "Fenerin ışığı söndü. Bir tur daha deneyebilirsin.";
+      ui.resultCopy.textContent = reason === "timeout"
+        ? "Vardiya süresi doldu. İskelelere daha kısa yoldan ulaşmayı deneyebilirsin."
+        : "Canların bitti. Zorlandığın kısmı antrenmanda yeniden deneyebilirsin.";
       playTone(190, 0.3, "sawtooth");
     }
     setPanels();
@@ -348,6 +429,7 @@
     if (tetherAnchor) {
       if (consumeAnchor) tetherAnchor.visited = true;
       if (award && isCleanRelease(tetherAnchor)) {
+        runStats.cleanThrows += 1;
         combo = Math.min(8, combo + 1);
         score += 25 * combo;
         const specialBonus = tetherAnchor.type === "normal" ? 0 : 30;
@@ -490,6 +572,7 @@
     tetherAnchor.fragileElapsed = tetherTime;
     const remainingHold = FRAGILE_HOLD_SECONDS - tetherTime;
     if (remainingHold <= 0) {
+      runStats.ringBreaks += 1;
       releaseTether({ award: false });
       ui.combo.textContent = "KIRILGAN HALKA KOPTU";
       messageUntil = elapsed + 1.1;
@@ -507,36 +590,53 @@
     return { x: hazard.x, y: hazard.y + Math.sin(phase) * 54 };
   }
 
-  function takeHit() {
-    if (invulnerable > 0 || state !== "playing") return;
+  function takeHit(reason = "water") {
+    if (state !== "playing" || (recoveryReady && reason !== "retry") || (invulnerable > 0 && reason === "hazard")) return;
+    if (reason !== "retry") {
+      const segment = checkpoints.filter(mark => checkpointX >= mark).length;
+      runStats.hits += 1;
+      runStats.segments[segment] += 1;
+      runStats.hitLog.push({ reason, segment, x: player.x, y: player.y, at: elapsed, anchorId: tetherAnchor?.id ?? null });
+      if (runStats.hitLog.length > 64) runStats.hitLog.shift();
+    }
     if (practiceIndex < 0) lives -= 1;
     combo = 0;
     ui.combo.textContent = "";
     releaseTether({ award: false, consumeAnchor: false });
+    for (const key of keys) recoveryBlockedKeys.add(key);
+    keys.clear(); steerPointer.clear(); tetherPointerY.clear();
     for (const anchor of anchors) {
       if (anchor.x >= checkpointX - 85) {
         anchor.visited = false;
         anchor.fragileElapsed = 0;
       }
     }
-    if (lives <= 0) { updateHud(true); finishRun(false); return; }
+    if (lives <= 0) { updateHud(true); finishRun(false, reason); return; }
     boostTime = 0;
     player.x = checkpointX;
     player.y = 430;
     player.vx = 185;
     player.vy = -70;
     cameraX = Math.max(0, checkpointX - W * 0.34);
-    invulnerable = 2.1;
+    invulnerable = 0;
+    recoveryReady = true;
+    const cause = { water: "SUYA DÜŞTÜN", hazard: "ŞAMANDIRAYA ÇARPTIN", ceiling: "FAZLA YÜKSELDİN", backtrack: "HATTIN GERİSİNE DÜŞTÜN", retry: "TEKRAR DENEME" };
+    ui.combo.textContent = `${cause[reason] || "İSKELEYE DÖNDÜN"} · SON İSKELE`;
+    messageUntil = elapsed + 1.6;
     playTone(155, 0.2, "square");
     updateHud(true);
   }
 
   function update(dt) {
+    if (recoveryReady) return;
     elapsed += dt;
     const steer = activeSteer();
     if (tutorialActive && tutorialStep === 2 && steer !== 0) completeTutorial();
     advanceTutorial(dt);
-    if (!tutorialActive && practiceIndex < 0) remaining = Math.max(0, remaining - dt);
+    if (!tutorialActive) {
+      runTime += dt;
+      if (practiceIndex < 0) remaining = Math.max(0, SHIFT_SECONDS - runTime);
+    }
     invulnerable = Math.max(0, invulnerable - dt);
     boostTime = Math.max(0, boostTime - dt);
     hudClock += dt;
@@ -575,7 +675,7 @@
       const pos = hazardPosition(hazard);
       const distance = Math.hypot(player.x - pos.x, player.y - pos.y);
       const collisionDistance = player.radius + hazard.r;
-      if (distance < collisionDistance) { takeHit(); hitThisFrame = true; break; }
+      if (distance < collisionDistance) { takeHit("hazard"); hitThisFrame = true; break; }
       if (distance < collisionDistance + 38 && distance > collisionDistance && !nearMissed.has(hazard.x)) {
         nearMissed.add(hazard.x);
         combo = Math.min(8, combo + 1);
@@ -586,19 +686,24 @@
       }
     }
 
-    if (!hitThisFrame && (player.y > 705 || player.y < -110 || player.x < checkpointX - 180)) takeHit();
+    if (!hitThisFrame) {
+      if (player.y > 705) takeHit("water");
+      else if (player.y < -110) takeHit("ceiling");
+      else if (player.x < checkpointX - 180) takeHit("backtrack");
+    }
     for (const mark of checkpoints) {
       if (player.x >= mark && checkpointX < mark) {
         checkpointX = mark;
+        splitTimes.push({ name: mark === checkpoints[0] ? "Orta iskele" : "Fener hattı", at: runTime });
         lives = Math.min(3, lives + 1);
-        ui.combo.textContent = "GÜVENLİ İSKELE";
+        ui.combo.textContent = `GÜVENLİ İSKELE · ${formatRunTime(runTime)}`;
         messageUntil = elapsed + 1.6;
         playTone(600, 0.1, "sine");
         updateHud(true);
       }
     }
     if (player.x >= ROUTE_END) finishRun(true);
-    else if (practiceIndex < 0 && remaining <= 0) finishRun(false);
+    else if (practiceIndex < 0 && remaining <= 0) finishRun(false, "timeout");
 
     if (hudClock >= 0.1) { hudClock = 0; updateHud(false); }
     updateReleaseCue();
@@ -621,6 +726,7 @@
     }
     const seconds = Math.ceil(remaining);
     ui.clock.textContent = practiceIndex >= 0 ? "ANTRENMAN" : tutorialActive ? "EĞİTİM" : `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")} KALAN`;
+    ui.runTime.textContent = `GEÇEN ${formatRunTime(runTime)}`;
     ui.previewButton.setAttribute("aria-pressed", String(previewOn));
     ui.previewButton.title = previewOn ? "Uçuş yolunu gizle (G)" : "Uçuş yolunu göster (G)";
     if (elapsed > messageUntil) {
@@ -630,7 +736,9 @@
     const touch = !ui.touch.hidden;
     const holdControl = touch ? "TUTUN" : "SPACE";
     let hint;
-    if (tetherAnchor && touch) {
+    if (recoveryReady) {
+      hint = "İSKELEDESİN · Hazır olunca yeniden <kbd>SPACE</kbd>/fare veya yön tuşuna bas";
+    } else if (tetherAnchor && touch) {
       hint = tetherAnchor.type === "winch"
         ? "MAKARA İPİ TOPLUYOR · TUTUN'da ↓ ile diren · parmağını kaldır: bırak"
         : "TUTUN'da ↑ kısalt · ↓ uzat · başlangıca dön: dur";
@@ -1045,9 +1153,20 @@
   }
 
   const keys = new Set();
+  function startRecovery() {
+    if (state !== "playing" || !recoveryReady) return;
+    recoveryReady = false;
+    invulnerable = 2.1;
+    lastFrame = 0;
+    updateHud(true);
+  }
+
   window.addEventListener("keydown", event => {
     if (["Space", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.code)) event.preventDefault();
     if (event.repeat) return;
+    if (state === "paused" && ["Space", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "KeyA", "KeyD", "KeyW", "KeyS"].includes(event.code)) return;
+    if (recoveryReady && recoveryBlockedKeys.has(event.code)) return;
+    if (["Space", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "KeyA", "KeyD", "KeyW", "KeyS"].includes(event.code)) startRecovery();
     keys.add(event.code);
     if (event.code === "Space") beginTether();
     if (event.code === "KeyG") togglePreview();
@@ -1056,7 +1175,7 @@
     }
     if (event.code === "KeyR" && state === "playing" && practiceIndex >= 0) {
       invulnerable = 0;
-      takeHit();
+      takeHit("retry");
       ui.combo.textContent = "TEKRAR DENEME";
       messageUntil = elapsed + 0.9;
     } else if (event.code === "KeyR" && (state === "won" || state === "lost")) resetRun();
@@ -1065,6 +1184,7 @@
     }
   });
   window.addEventListener("keyup", event => {
+    recoveryBlockedKeys.delete(event.code);
     keys.delete(event.code);
     if (event.code === "Space" && tetherPointerId === null) releaseTether();
   });
@@ -1085,7 +1205,8 @@
   });
 
   function beginTetherPointer(event) {
-    if (event.button !== 0 || tetherHeld) return;
+    if (state !== "playing" || event.button !== 0 || tetherHeld) return;
+    startRecovery();
     beginTether();
     if (!tetherHeld) return;
     tetherPointerId = event.pointerId;
@@ -1117,6 +1238,8 @@
     const direction = Number(button.dataset.steer);
     button.addEventListener("pointerdown", event => {
       event.preventDefault();
+      if (state !== "playing") return;
+      startRecovery();
       steerPointer.set(event.pointerId, direction);
       try { button.setPointerCapture(event.pointerId); } catch { /* Pointer capture is optional. */ }
     });
@@ -1154,6 +1277,7 @@
   });
 
   ui.bestStart.textContent = formatScore(best);
+  ui.bestTimeStart.textContent = formatRunTime(bestTime);
   setPanels();
   requestAnimationFrame(frame);
 })();

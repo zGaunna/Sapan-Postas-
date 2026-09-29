@@ -1,6 +1,8 @@
 # Yerel yedekler ve geliştirme oturumu notları
 work/backup-*/
 work/claude-handoff.md
+work/browser-playtest.html
+work/browser-playtest.js
 
 # Geçici dosyalar
 *.log
