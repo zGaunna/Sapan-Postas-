@@ -15,6 +15,7 @@
   const SLING = { baseImpulse: 40, bonusImpulse: 60, seconds: 1.2, vxCap: 400 };
   const FRAGILE_HOLD_SECONDS = 1.55;
   const WINCH_REEL_SPEED = 135;
+  const PHYSICS_DT = 1 / 120;
   const BEST_TIME_KEY = "sapan-postasi-best-time";
   const canvas = document.querySelector("#game");
   const ctx = canvas.getContext("2d", { alpha: false });
@@ -89,6 +90,7 @@
   let splitTimes = [];
   let remaining = SHIFT_SECONDS;
   let lastFrame = 0;
+  let frameAccumulator = 0;
   let hudClock = 0;
   let messageUntil = 0;
   let combo = 0;
@@ -271,6 +273,7 @@
     tutorialActive = practiceIndex < 0 && !hasCompletedTutorial(); tutorialStep = 0; tutorialTimer = 0;
     steerPointer.clear(); tetherPointerY.clear(); tetherPointerId = null; keys.clear();
     state = "playing";
+    resetFrameClock();
     ui.combo.textContent = "";
     setPanels();
     updateHud(true);
@@ -280,13 +283,14 @@
   function pauseGame() {
     if (state !== "playing") return;
     state = "paused";
+    resetFrameClock();
     setPanels();
   }
 
   function resumeGame() {
     if (state !== "paused") return;
     state = "playing";
-    lastFrame = 0;
+    resetFrameClock();
     setPanels();
   }
 
@@ -984,9 +988,9 @@
     const STEER_ACCEL_GAIN = 420;
     const DRAG_X = 0.16;
     const DRAG_Y = 0.025;
-    const DT = 1 / 60;
-    const STEPS = 60;
-    const STEPS_PER_POINT = 6;
+    const DT = PHYSICS_DT;
+    const STEPS = 120;
+    const STEPS_PER_POINT = 12;
     const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
     const num = (v, fallback = 0) => (Number.isFinite(v) ? v : fallback);
     const p = snapshot.player;
@@ -1143,11 +1147,26 @@
     } catch { /* Sound is optional and may be unavailable in some browsers. */ }
   }
 
+  // Sonnet 5.5 ile hazırlanan döngü: çizim hızı, halat fiziğinin adımını değiştirmez.
+  function resetFrameClock() {
+    lastFrame = 0;
+    frameAccumulator = 0;
+  }
+
   function frame(timestamp) {
     if (!lastFrame) lastFrame = timestamp;
     const dt = Math.min(0.035, Math.max(0, (timestamp - lastFrame) / 1000));
     lastFrame = timestamp;
-    if (state === "playing") update(dt);
+    if (state === "playing" && !recoveryReady) {
+      frameAccumulator += dt;
+      while (frameAccumulator >= PHYSICS_DT - 1e-9 && state === "playing" && !recoveryReady) {
+        update(PHYSICS_DT);
+        frameAccumulator = Math.max(0, frameAccumulator - PHYSICS_DT);
+      }
+      if (state !== "playing" || recoveryReady) frameAccumulator = 0;
+    } else {
+      frameAccumulator = 0;
+    }
     draw(timestamp / 1000);
     requestAnimationFrame(frame);
   }
@@ -1157,7 +1176,7 @@
     if (state !== "playing" || !recoveryReady) return;
     recoveryReady = false;
     invulnerable = 2.1;
-    lastFrame = 0;
+    resetFrameClock();
     updateHud(true);
   }
 
@@ -1201,7 +1220,7 @@
       releaseTether({ award: false, consumeAnchor: false });
       pauseGame();
     }
-    lastFrame = 0;
+    resetFrameClock();
   });
 
   function beginTetherPointer(event) {

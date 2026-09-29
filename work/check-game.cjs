@@ -11,7 +11,7 @@ for (const id of referencedIds) {
   assert.ok(html.includes(`id="${id}"`), `Missing HTML node #${id}`);
 }
 assert.equal((html.match(/data-practice-start="[012]"/g) || []).length, 3);
-const source = original.replace(/\}\)\(\);\s*$/, `
+const source = original.replace("update(PHYSICS_DT);", "if (globalThis.__beforeFrameStep) globalThis.__beforeFrameStep(); update(PHYSICS_DT);").replace(/\}\)\(\);\s*$/, `
   globalThis.__gameDebug = {
     resetRun, update, updateHud, updateSpecialRing, takeHit, beginTether, releaseTether, predictReleasePath, drawReleasePreview, togglePreview, isCleanRelease, releaseQuality,
     pauseGame, resumeGame, finishRun, nearestAnchor, player, anchors, seals, keys,
@@ -199,7 +199,7 @@ for (const clean of [false, true]) {
       assert.equal(prediction.outcome, "flight");
       game.releaseTether();
       for (let point = 1; point < prediction.points.length; point++) {
-        for (let step = 0; step < 6; step++) game.update(1 / 60);
+        for (let step = 0; step < 12; step++) game.update(1 / 120);
         assert.ok(Math.abs(game.player.x - prediction.points[point].x) < 1e-8, `X parity: clean=${clean}, steer=${steer}, vx=${vx}`);
         assert.ok(Math.abs(game.player.y - prediction.points[point].y) < 1e-8, `Y parity: clean=${clean}, steer=${steer}, vx=${vx}`);
       }
@@ -215,7 +215,7 @@ assert.equal(predict({ player: { x: 440, y: -105, vx: 200, vy: -500 } }).outcome
 assert.equal(predict({ player: { x: -29, y: 300, vx: -100, vy: 0 } }).outcome, "backtrack");
 assert.ok(predict({ cleanRelease: true }).points[1].x - predict().points[1].x > 9);
 const firstClamp = predict({ player: { x: 0, y: 300, vx: 500, vy: 0 }, steer: -1, checkpointX: -1000 });
-assert.ok(Math.abs(firstClamp.points[1].x - 30.66) < 0.05, "Non-clean release must clamp during first update");
+assert.ok(Math.abs(firstClamp.points[1].x - 30.47655) < 0.01, "Non-clean release must clamp during first update");
 
 game.resetRun(-1);
 assert.equal(element("#preview-toggle").hidden, true);
@@ -312,7 +312,7 @@ game.resumeGame();
 game.frame(5000);
 assert.equal(game.runTime(), beforePause, "Resume must reset frame baseline");
 game.frame(5010);
-assert.ok(Math.abs(game.runTime() - beforePause - 0.01) < 1e-10);
+assert.ok(Math.abs(game.runTime() - beforePause - 1 / 120) < 1e-10);
 canvas.getBoundingClientRect = oldRect;
 storage.delete("sapan-postasi-tutorial");
 game.resetRun(-1);

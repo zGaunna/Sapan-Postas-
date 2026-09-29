@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const { game, dispatchKey, element } = require("./check-game.cjs");
 
-function runRoute({ reelTo, releaseOffset, start = -1, frameRate = 120 }) {
+function runRoute({ reelTo, releaseOffset, start = -1, frameRate = 120, ringPolicy = {}, observe, captureInputs = false }) {
   game.resetRun(start);
   let grabs = 0;
   let releases = 0;
@@ -9,17 +9,21 @@ function runRoute({ reelTo, releaseOffset, start = -1, frameRate = 120 }) {
   let steps = 0;
   let previousAnchor = null;
   const ringSplits = [];
+  const inputs = [];
   const dt = 1 / frameRate;
   for (; steps < frameRate * 140 && game.state() === "playing"; steps++) {
     if (game.recoveryReady()) dispatchKey("Space");
     game.keys.clear();
     game.keys.add("KeyD");
     const anchor = game.tetherAnchor();
-    if (!anchor) game.beginTether();
+    let action = null;
+    if (!anchor) { game.beginTether(); action = "begin"; }
     else {
-      if (game.ropeLength() > reelTo) game.keys.add("KeyW");
-      if (game.player.y > anchor.y && game.player.x - anchor.x >= releaseOffset && game.player.vx > 140) {
+      const policy = ringPolicy[anchor.id] || { reelTo, releaseOffset };
+      if (game.ropeLength() > policy.reelTo) game.keys.add("KeyW");
+      if (game.player.y > anchor.y && game.player.x - anchor.x >= policy.releaseOffset && game.player.vx > 140) {
         game.releaseTether();
+        action = "release";
         releases++;
       }
     }
@@ -28,13 +32,16 @@ function runRoute({ reelTo, releaseOffset, start = -1, frameRate = 120 }) {
       ringSplits.push({ ring: game.tetherAnchor().id, at: +(steps * dt).toFixed(3) });
     }
     previousAnchor = game.tetherAnchor();
+    if (captureInputs) inputs.push({ keys: [...game.keys], action });
     game.update(dt);
+    if (observe) observe(game);
     farthest = Math.max(farthest, game.player.x);
   }
   return { reelTo, releaseOffset, start, frameRate, state: game.state(), seconds: +(steps * dt).toFixed(2),
     farthest: Math.round(farthest), lives: game.lives(), seals: game.sealCount(), grabs, releases,
     hits: game.stats().hits, segments: [...game.stats().segments],
-    hitLog: game.stats().hitLog.map(hit => ({ ...hit, x: Math.round(hit.x), y: Math.round(hit.y), at: +hit.at.toFixed(3) })), ringSplits };
+    hitLog: game.stats().hitLog.map(hit => ({ ...hit, x: Math.round(hit.x), y: Math.round(hit.y), at: +hit.at.toFixed(3) })), ringSplits,
+    ...(captureInputs ? { inputs } : {}) };
 }
 
 const results = [];
@@ -57,5 +64,5 @@ const frameResults = [30, 60, 120, 180].map(frameRate => {
 const firstRun = runRoute(winningPolicy);
 const secondRun = runRoute(winningPolicy);
 assert.equal(JSON.stringify(firstRun), JSON.stringify(secondRun), "Same input and dt must produce identical route trace");
-console.log("Route checks passed: deterministic completion and 30/60/120/180 Hz probes.", JSON.stringify(frameResults));
+console.log("Route checks passed: deterministic completion and 30/60/120/180 Hz physics-step stress probes.", JSON.stringify(frameResults));
 module.exports = { runRoute, results };

@@ -35,6 +35,8 @@ Kurtarıldığında iskelede bekleyebilirsin. Hazır olunca **yeniden** SPACE/fa
 
 Orta iskele ve fener hattında geçiş süren gösterilir. Sonuç ekranında toplam süreyi, iskele geçişlerini, temiz atış sayısını ve düşüş/çarpışmaları görebilirsin. **Fener süresi** rekorunu yalnızca iskeleye ulaşan normal vardiyalar kaydeder; antrenman veya başarısız koşu değiştirmez. Üç mühürden azıyla varırsan sonuç bunu açıkça gösterir; üçü de toplandıysa teslimat tamamlanır. Yeniden doğduğunda o ana kadarki aktif süre korunur. Fener yaklaşımında son bir normal halka bulunur.
 
+Halat ve uçuş fiziği saniyede 120 sabit adımla çalışır; ekranın çizim hızı bu adımı değiştirmez. Antrenmandaki uçuş yolu da aynı adımı kullanır. Uzun takılmalarda ani sıçramayı önlemek için kare başına işlenen süre sınırlıdır; 28 FPS altında oyun zamanı yavaşlayabilir.
+
 ## Geliştirme ve doğrulama
 
 Projenin GitHub deposu: [zGaunna/Sapan-Postas-](https://github.com/zGaunna/Sapan-Postas-).
@@ -45,6 +47,7 @@ Oyun Vanilla JavaScript ve Canvas kullanır; paket kurulumu veya derleme gerekme
 node --check game.js
 node work/check-game.cjs
 node work/playtest-route.cjs
+node work/check-frame-loop.cjs
 ```
 
-İlk test; antrenman modlarını, yeniden denemeyi, süreyi, özel halkaları, rekor ayrımını, bozuk/engellenmiş depolamayı, iskele sürelerini, güvenli kurtarmayı ve uçuş önizlemesinin gerçek oyun fiziğiyle eşleşmesini kontrol eder. Parkur testi, aynı girdilerle tekrarlanabilir bir kontrol stratejisinin 30/60/120/180 Hz adımlarında vardiyayı bitirdiğini doğrular; insan oyuncunun zorluğunu ölçmez ve üç mührün de toplanabildiğini henüz kanıtlamaz.
+İlk test; antrenman modlarını, yeniden denemeyi, süreyi, özel halkaları, rekor ayrımını, bozuk/engellenmiş depolamayı, iskele sürelerini, güvenli kurtarmayı ve uçuş önizlemesinin gerçek oyun fiziğiyle eşleşmesini kontrol eder. Parkur testi, aynı girdilerle tekrarlanabilir bir kontrol stratejisinin vardiyayı bitirdiğini doğrular. Kare döngüsü testi, kaydedilen bütün parkur girdilerini 30/60/120/144/180 Hz çizim döngülerinde oynatıp konum, süre, iskele geçişleri ve düşüşlerin birebir eşleştiğini kontrol eder. İnsan oyuncunun zorluğunu ölçmez ve mevcut konumlarda üç mührün de toplanabildiğini henüz kanıtlamaz.
