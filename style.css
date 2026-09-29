@@ -82,6 +82,12 @@ kbd { display: inline-grid; place-items: center; min-width: 26px; height: 23px; 
 .hud-stat strong { display: block; margin-top: 2px; font: 750 16px/1.2 "Segoe UI", system-ui, sans-serif; font-variant-numeric: tabular-nums; }
 .rope-readout strong b { color: var(--ink); font: inherit; }
 .hud-stat strong span { color: #8fa4a0; font-size: 11px; }
+.seal-readout { display: flex; gap: 6px; align-items: center; }
+.seal-marks { display: flex; gap: 4px; list-style: none; margin: 3px 0 0; padding: 0; }
+.seal-marks li { display: grid; place-items: center; width: 18px; height: 18px; border: 1px solid #8fa4a0; border-radius: 50%; color: #bfd0c8; font: 800 10px/1 "Segoe UI", sans-serif; background: rgba(6,22,31,.6); }
+.seal-marks .is-collected { color: #24302d; border-color: var(--amber); background: var(--amber); }
+.seal-marks .is-missed { color: #8fa4a0; border-color: #586d68; text-decoration: line-through; }
+.result-seal-marks { justify-content: center; margin: -3px 0 10px; }
 .rope-meter { width: 48px; height: 3px; margin-top: 5px; overflow: hidden; background: rgba(219,236,228,.2); border-radius: 4px; }
 .rope-meter i { display: block; width: 50%; height: 100%; background: var(--teal); border-radius: inherit; box-shadow: 0 0 7px rgba(85,214,207,.7); transition: width .08s linear; }
 .route-label { margin-bottom: 6px; text-shadow: 0 2px 8px #001018; }

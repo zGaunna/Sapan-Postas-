@@ -6,7 +6,8 @@ canvas.getBoundingClientRect = () => ({ width: 0, height: 0 });
 
 function snapshot() {
   return JSON.stringify({ player: game.player, state: game.state(), time: game.runTime(),
-    seals: game.sealCount(), stats: game.stats(), splits: game.splitTimes() });
+    seals: game.sealCount(), sealFlags: game.seals.map(seal => ({ id: seal.id, collected: seal.collected,
+      missedNotified: seal.missedNotified })), stats: game.stats(), splits: game.splitTimes() });
 }
 
 function replayFrames(recording, frameRate) {

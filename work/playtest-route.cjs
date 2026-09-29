@@ -10,21 +10,31 @@ function runRoute({ reelTo, releaseOffset, start = -1, frameRate = 120, ringPoli
   let previousAnchor = null;
   const ringSplits = [];
   const inputs = [];
+  const releaseLog = [];
   const dt = 1 / frameRate;
+  let queuedRelease = null;
   for (; steps < frameRate * 140 && game.state() === "playing"; steps++) {
     if (game.recoveryReady()) dispatchKey("Space");
     game.keys.clear();
     game.keys.add("KeyD");
     const anchor = game.tetherAnchor();
+    if (queuedRelease?.anchor !== anchor) queuedRelease = null;
     let action = null;
     if (!anchor) { game.beginTether(); action = "begin"; }
     else {
       const policy = ringPolicy[anchor.id] || { reelTo, releaseOffset };
       if (game.ropeLength() > policy.reelTo) game.keys.add("KeyW");
-      if (game.player.y > anchor.y && game.player.x - anchor.x >= policy.releaseOffset && game.player.vx > 140) {
+      const releaseThreshold = policy.releaseOffset + game.player.vx * dt * (policy.jitterSteps || 0);
+      if (!queuedRelease && game.player.y > anchor.y && game.player.x - anchor.x >= releaseThreshold && game.player.vx > 140) {
+        queuedRelease = { anchor, steps: policy.delaySteps || 0 };
+      }
+      if (queuedRelease && queuedRelease.steps-- <= 0) {
+        releaseLog.push({ ring: anchor.id, at: +(steps * dt).toFixed(4), x: game.player.x,
+          y: game.player.y, rope: game.ropeLength() });
         game.releaseTether();
         action = "release";
         releases++;
+        queuedRelease = null;
       }
     }
     if (game.tetherAnchor() && game.tetherAnchor() !== previousAnchor) {
@@ -41,6 +51,7 @@ function runRoute({ reelTo, releaseOffset, start = -1, frameRate = 120, ringPoli
     farthest: Math.round(farthest), lives: game.lives(), seals: game.sealCount(), grabs, releases,
     hits: game.stats().hits, segments: [...game.stats().segments],
     hitLog: game.stats().hitLog.map(hit => ({ ...hit, x: Math.round(hit.x), y: Math.round(hit.y), at: +hit.at.toFixed(3) })), ringSplits,
+    collected: game.seals.map(seal => seal.collected), releaseLog,
     ...(captureInputs ? { inputs } : {}) };
 }
 
@@ -49,7 +60,7 @@ for (const reelTo of [118, 150, 185, 220, 260]) {
   for (const releaseOffset of [-70, -30, 0, 30, 70]) results.push(runRoute({ reelTo, releaseOffset }));
 }
 results.sort((a, b) => (b.state === "won") - (a.state === "won") || b.farthest - a.farthest || a.seconds - b.seconds);
-console.log(JSON.stringify(results.slice(0, 3).map(({ ringSplits, ...result }) => result), null, 2));
+console.log(JSON.stringify(results.slice(0, 3).map(({ ringSplits, releaseLog, ...result }) => result), null, 2));
 const winningPolicy = { reelTo: 150, releaseOffset: -30 };
 const frameResults = [30, 60, 120, 180].map(frameRate => {
   const run = runRoute({ ...winningPolicy, frameRate });

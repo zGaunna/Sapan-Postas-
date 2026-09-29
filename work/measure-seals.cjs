@@ -1,8 +1,9 @@
 const { runRoute } = require("./playtest-route.cjs");
 const { game } = require("./check-game.cjs");
-if (process.argv.includes("--candidate")) {
-  game.seals[0].y = 430;
-  game.seals[2].y = 480;
+if (process.argv.includes("--legacy")) {
+  game.seals[0].y = 350;
+  game.seals[1].x = 9350; game.seals[1].y = 285;
+  game.seals[2].y = 400;
 }
 
 function measure(ringPolicy = {}, frameRate = 120) {

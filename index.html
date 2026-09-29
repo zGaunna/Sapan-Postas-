@@ -27,7 +27,7 @@
       <section id="hud" class="hud" hidden aria-live="polite">
         <div class="hud-left">
           <div class="hud-stat score-stat"><small>PUAN</small><strong id="score">00000</strong></div>
-          <div class="hud-stat"><small>POSTA</small><strong id="seals">0 <span>/ 3</span></strong></div>
+          <div class="hud-stat"><small>POSTA</small><div class="seal-readout"><strong id="seals">0 <span>/ 3</span></strong><ol id="seal-marks" class="seal-marks" aria-label="Mühür durumu"></ol></div></div>
           <div id="rope-readout" class="hud-stat rope-readout" hidden aria-live="polite"><small>HALAT</small><strong><b id="rope-length">0</b><span> px</span></strong><div class="rope-meter" aria-hidden="true"><i id="rope-fill"></i></div></div>
         </div>
         <div class="hud-center"><span class="route-label">FENER İSKELESİ</span><div class="route-track"><span id="route-fill"></span><i id="route-marker"></i></div><small id="route-clock" class="route-clock">1:55 KALAN</small><small id="run-time" class="run-time">GEÇEN 0:00.00</small></div>
@@ -60,7 +60,7 @@
             <div><kbd>↑</kbd><kbd>↓</kbd><span>tutunurken ipi kısalt / uzat (W / S)</span></div>
             <div><kbd>ESC</kbd><span>duraklat</span></div>
           </div>
-          <div class="start-actions"><button id="start-button" class="primary-button" type="button">Vardiyaya başla <span aria-hidden="true">↗</span></button><div class="best-score">EN İYİ <b id="best-start">0</b></div><div class="best-score">FENER SÜRESİ <b id="best-time-start">—</b></div></div>
+          <div class="start-actions"><button id="start-button" class="primary-button" type="button">Vardiyaya başla <span aria-hidden="true">↗</span></button><div class="best-score">EN İYİ <b id="best-start">0</b></div><div class="best-score">FENER SÜRESİ <b id="best-time-start">—</b></div><div class="best-score">TESLİMAT SÜRESİ <b id="delivery-time-start">—</b></div></div>
           <section class="practice" aria-labelledby="practice-title">
             <h2 id="practice-title">Antrenman</h2>
             <div class="practice-options">
@@ -87,9 +87,12 @@
           <div id="result-kicker" class="eyebrow">TESLİMAT TAMAM</div><h2 id="result-title">Fener söndürülmedi.</h2><p id="result-copy">Son tekne de kıyıya vardı.</p>
           <div class="result-score"><small id="result-score-label">BU VARDİYA</small><strong id="final-score">0</strong><span id="new-best" hidden>YENİ REKOR</span></div>
           <div class="result-stats"><span>Paket <b id="final-seals">0/3</b></span><span>En iyi <b id="best-result">0</b></span></div>
+          <ol id="result-seal-marks" class="seal-marks result-seal-marks" aria-label="Teslim edilen mühürler"></ol>
           <div class="result-stats"><span>Temiz atış <b id="final-throws">0</b></span><span>Düşüş / çarpışma <b id="final-hits">0</b></span></div>
           <div class="result-stats"><span>Süre <b id="final-time">0:00.00</b></span><span>Fener rekoru <b id="best-time-result">—</b></span></div>
           <p id="new-time-best" class="time-record" hidden>YENİ SÜRE REKORU</p>
+          <div class="result-stats"><span>Teslimat süresi</span><b id="delivery-time-result">—</b></div>
+          <p id="new-delivery-best" class="time-record" hidden>YENİ TESLİMAT REKORU</p>
           <ol id="result-splits" class="result-splits" hidden aria-label="İskele geçiş süreleri"></ol>
           <div class="dialog-actions"><button id="replay-button" class="primary-button" type="button">Yeniden oyna <span>↗</span></button><button id="result-menu-button" class="text-button" type="button">Ana menü</button></div>
         </div>

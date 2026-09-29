@@ -29,6 +29,8 @@ const source = original.replace("update(PHYSICS_DT);", "if (globalThis.__beforeF
     frame, completeTutorial,
     recoveryReady: () => recoveryReady, startRecovery, hazardPosition,
     elapsed: () => elapsed, invulnerable: () => invulnerable,
+    getSealStatus, getSealLocator, drawSealLocator,
+    setCamera: x => { cameraX = x; },
   };
 })();`);
 assert.notEqual(source, original, "Test instrumentation must be inserted into the game closure");

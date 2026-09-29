@@ -31,6 +31,10 @@ Bazı halkalar farklı davranır; oyun içindeki görünümleri ve ipuçları on
 
 Üç mühür ve güvenli geçişler puan kazandırır. Kırmızı şamandıralardan ve suya düşmekten kaçın; düşüş bir can götürür ve son güvenli iskelede devam edersin.
 
+Paketlerdeki **1 / 2 / 3** sayıları HUD'daki üç işaretle eşleşir: dolu sarı işaret alınan mührü, üstü çizili işaret geçileni gösterir. İlerideki mühür ekran dışındaysa kenardaki numaralı ok yönünü belirtir. İlk mühür doğal ilerleme üzerinde; ikinci mühür için makaradaki ipi hemen kısaltma, üçüncü için kısa ip ve daha geç bırakış dene. İlgili halkada ipucu görünür. Mühürler yalnızca yakınına uçunca alınır.
+
+Geçilen mühürden önceki iskeleye kurtarıldıysan yeniden deneyebilirsin. Alınmış mühürler kurtarmada korunur. Kaydedilen iskele gerisinde kalan eksik mühür için yeni vardiya gerekir. **Teslimat süresi** rekoru, üç mührü de toplayıp fenere ulaştığın normal vardiyaları kaydeder; **Fener süresi** ile ayrı saklanır. Antrenman, kayıp veya eksik mühürlü varış teslimat rekorunu değiştirmez.
+
 Kurtarıldığında iskelede bekleyebilirsin. Hazır olunca **yeniden** SPACE/fare veya yön/ip kontrolüne bas; düşmeden önce basılı tuttuğun tuşu önce bırakmalısın. Bu bekleme, duraklatma ve öğretici süreleri vardiya sayacına ve süre rekoruna eklenmez. Şamandıra dokunulmazlığı suya düşmeyi engellemez.
 
 Orta iskele ve fener hattında geçiş süren gösterilir. Sonuç ekranında toplam süreyi, iskele geçişlerini, temiz atış sayısını ve düşüş/çarpışmaları görebilirsin. **Fener süresi** rekorunu yalnızca iskeleye ulaşan normal vardiyalar kaydeder; antrenman veya başarısız koşu değiştirmez. Üç mühürden azıyla varırsan sonuç bunu açıkça gösterir; üçü de toplandıysa teslimat tamamlanır. Yeniden doğduğunda o ana kadarki aktif süre korunur. Fener yaklaşımında son bir normal halka bulunur.
@@ -48,6 +52,9 @@ node --check game.js
 node work/check-game.cjs
 node work/playtest-route.cjs
 node work/check-frame-loop.cjs
+node work/check-delivery.cjs
 ```
 
-İlk test; antrenman modlarını, yeniden denemeyi, süreyi, özel halkaları, rekor ayrımını, bozuk/engellenmiş depolamayı, iskele sürelerini, güvenli kurtarmayı ve uçuş önizlemesinin gerçek oyun fiziğiyle eşleşmesini kontrol eder. Parkur testi, aynı girdilerle tekrarlanabilir bir kontrol stratejisinin vardiyayı bitirdiğini doğrular. Kare döngüsü testi, kaydedilen bütün parkur girdilerini 30/60/120/144/180 Hz çizim döngülerinde oynatıp konum, süre, iskele geçişleri ve düşüşlerin birebir eşleştiğini kontrol eder. İnsan oyuncunun zorluğunu ölçmez ve mevcut konumlarda üç mührün de toplanabildiğini henüz kanıtlamaz.
+İlk test; antrenman modlarını, yeniden denemeyi, süreyi, özel halkaları, rekor ayrımını, bozuk/engellenmiş depolamayı, iskele sürelerini, güvenli kurtarmayı ve uçuş önizlemesinin gerçek oyun fiziğiyle eşleşmesini kontrol eder. Parkur testi, aynı girdilerle tekrarlanabilir bir kontrol stratejisinin vardiyayı bitirdiğini doğrular. Kare döngüsü testi, kaydedilen bütün parkur girdilerini 30/60/120/144/180 Hz çizim döngülerinde oynatıp konum, süre, iskele geçişleri ve düşüşlerin birebir eşleştiğini kontrol eder.
+
+Teslimat testi aynı tekrar kontrolünü 3/3 mühürlü gerçek koşuda yapar; makara atışında en az 0,25 saniyelik farklı bırakışları, birkaç ip uzunluğunu ve üç hedef atışında 0–4 fizik adımı gecikmenin 125 birleşimini doğrular. Ayrıca mühür bildirimi/kurtarma kurallarını ve iki süre kaydının ayrılığını kontrol eder. İnsan oyuncunun zorluğu bu otomatik testlerle ölçülmez.

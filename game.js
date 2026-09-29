@@ -17,13 +17,14 @@
   const WINCH_REEL_SPEED = 135;
   const PHYSICS_DT = 1 / 120;
   const BEST_TIME_KEY = "sapan-postasi-best-time";
+  const DELIVERY_TIME_KEY = "sapan-postasi-best-time-full";
   const canvas = document.querySelector("#game");
   const ctx = canvas.getContext("2d", { alpha: false });
   const ui = {
     hud: document.querySelector("#hud"), start: document.querySelector("#start-screen"),
     pause: document.querySelector("#pause-screen"), result: document.querySelector("#result-screen"),
     touch: document.querySelector("#touch-controls"), score: document.querySelector("#score"),
-    seals: document.querySelector("#seals"), lives: document.querySelector("#lives"),
+    seals: document.querySelector("#seals"), sealMarks: document.querySelector("#seal-marks"), lives: document.querySelector("#lives"),
     routeFill: document.querySelector("#route-fill"), routeMarker: document.querySelector("#route-marker"),
     clock: document.querySelector("#route-clock"),
     hint: document.querySelector("#hint"), releaseCue: document.querySelector("#release-cue"),
@@ -42,6 +43,8 @@
     finalHits: document.querySelector("#final-hits"), finalThrows: document.querySelector("#final-throws"),
     runTime: document.querySelector("#run-time"), finalTime: document.querySelector("#final-time"),
     bestTimeStart: document.querySelector("#best-time-start"), bestTimeResult: document.querySelector("#best-time-result"),
+    deliveryTimeStart: document.querySelector("#delivery-time-start"), deliveryTimeResult: document.querySelector("#delivery-time-result"),
+    newDeliveryBest: document.querySelector("#new-delivery-best"), resultSealMarks: document.querySelector("#result-seal-marks"),
     newTimeBest: document.querySelector("#new-time-best"), splits: document.querySelector("#result-splits"),
     finalSeals: document.querySelector("#final-seals"), newBest: document.querySelector("#new-best"),
     sound: document.querySelector("#sound-toggle"), pauseButton: document.querySelector("#pause-button"),
@@ -58,9 +61,9 @@
     visited: false, fragileElapsed: 0
   }));
   const seals = [
-    { x: 2275, y: 350, collected: false },
-    { x: 9350, y: 285, collected: false },
-    { x: 14150, y: 400, collected: false }
+    { id: 1, approachRing: 2, x: 2275, y: 540, collected: false, missedNotified: false },
+    { id: 2, approachRing: 13, x: 9050, y: 330, collected: false, missedNotified: false },
+    { id: 3, approachRing: 21, x: 14150, y: 480, collected: false, missedNotified: false }
   ];
   const hazards = [
     { x: 3200, y: 470, r: 24, phase: 0, moving: false },
@@ -132,7 +135,9 @@
 
   let best = readBest();
   let bestTime = null;
+  let bestDeliveryTime = null;
   try { bestTime = readBestRunTime(localStorage); } catch { /* Storage can be blocked. */ }
+  try { bestDeliveryTime = readBestRunTime(localStorage, DELIVERY_TIME_KEY); } catch { /* Storage can be blocked. */ }
 
   // Süre yardımcıları Sonnet 5.5 ile hazırlandı; depolama hataları oyunu durdurmaz.
   function formatRunTime(seconds) {
@@ -152,15 +157,15 @@
     return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
   }
 
-  function readBestRunTime(storage) {
+  function readBestRunTime(storage, key = BEST_TIME_KEY) {
     try {
       if (!storage || typeof storage.getItem !== "function") return null;
-      return parseBestSeconds(storage.getItem(BEST_TIME_KEY));
+      return parseBestSeconds(storage.getItem(key));
     } catch { return null; }
   }
 
-  function saveBestRunTime(storage, seconds) {
-    const previous = readBestRunTime(storage);
+  function saveBestRunTime(storage, seconds, key = BEST_TIME_KEY) {
+    const previous = readBestRunTime(storage, key);
     const unchanged = { bestTime: previous, improved: false, saved: false };
     if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) return unchanged;
     const text = seconds.toFixed(6);
@@ -168,7 +173,7 @@
     if (candidate === null || (previous !== null && candidate >= previous)) return unchanged;
     try {
       if (!storage || typeof storage.setItem !== "function") return unchanged;
-      storage.setItem(BEST_TIME_KEY, text);
+      storage.setItem(key, text);
     } catch { return unchanged; }
     return { bestTime: candidate, improved: true, saved: true };
   }
@@ -251,7 +256,7 @@
     practiceIndex = startIndex;
     const startX = practiceIndex < 0 ? practiceStarts[0] : practiceStarts[practiceIndex];
     for (const anchor of anchors) { anchor.visited = false; anchor.fragileElapsed = 0; }
-    for (const seal of seals) seal.collected = false;
+    for (const seal of seals) { seal.collected = false; seal.missedNotified = false; }
     if (practiceIndex > 0) {
       for (const anchor of anchors) if (anchor.x < startX - 85) anchor.visited = true;
       for (const seal of seals) if (seal.x < startX) seal.collected = true;
@@ -308,18 +313,28 @@
     ui.finalHits.textContent = String(runStats.hits);
     ui.finalThrows.textContent = String(runStats.cleanThrows);
     let timeRecord = false;
+    let deliveryRecord = false;
     if (won) splitTimes.push({ name: "Fener iskelesi", at: runTime });
     if (won && practiceIndex < 0) {
       try {
         const result = saveBestRunTime(localStorage, runTime);
         bestTime = result.bestTime;
         timeRecord = result.improved;
+        if (sealCount === 3) {
+          const delivery = saveBestRunTime(localStorage, runTime, DELIVERY_TIME_KEY);
+          bestDeliveryTime = delivery.bestTime;
+          deliveryRecord = delivery.improved;
+        }
       } catch { /* Record persistence is optional. */ }
     }
     ui.finalTime.textContent = formatRunTime(runTime);
     ui.bestTimeStart.textContent = formatRunTime(bestTime);
     ui.bestTimeResult.textContent = formatRunTime(bestTime);
     ui.newTimeBest.hidden = !timeRecord;
+    ui.deliveryTimeStart.textContent = formatRunTime(bestDeliveryTime);
+    ui.deliveryTimeResult.textContent = formatRunTime(bestDeliveryTime);
+    ui.newDeliveryBest.hidden = !deliveryRecord;
+    renderSealMarks(ui.resultSealMarks, true);
     let previousSplit = 0;
     ui.splits.innerHTML = splitTimes.map(split => {
       const displayedSplit = Math.floor(split.at * 100 + 1e-9);
@@ -338,7 +353,7 @@
         ? "Hazırsan vardiyada süreye karşı deneyebilirsin."
         : sealCount === 3
           ? "Üç mührü de teslim ettin. Bu gecelik işin bitti."
-          : `${sealCount}/3 mühür topladın. Üçünü de toplamak için bir sonraki vardiyada farklı bir rota deneyebilirsin.`;
+          : `${sealCount}/3 mühür topladın. Tam teslimat için yeni vardiyada eksik mühürlerin rotasını dene.`;
       playTone(740, 0.15, "triangle");
       playTone(980, 0.22, "sine", 0.13);
     } else {
@@ -620,6 +635,7 @@
     player.x = checkpointX;
     player.y = 430;
     player.vx = 185;
+    for (const seal of seals) if (!seal.collected && seal.x > checkpointX) seal.missedNotified = false;
     player.vy = -70;
     cameraX = Math.max(0, checkpointX - W * 0.34);
     invulnerable = 0;
@@ -667,9 +683,15 @@
         seal.collected = true;
         sealCount += 1;
         score += 50;
-        ui.combo.textContent = `MÜHÜR ALINDI  ${sealCount}/3`;
+        ui.combo.textContent = `${seal.id}. MÜHÜR ALINDI · ${sealCount}/3`;
         messageUntil = elapsed + 1.1;
         playTone(880, 0.11, "sine");
+        updateHud(true);
+      }
+      if (!seal.collected && player.x > seal.x + 60 && !seal.missedNotified) {
+        seal.missedNotified = true;
+        ui.combo.textContent = `${seal.id}. MÜHÜR GEÇİLDİ`;
+        messageUntil = elapsed + 1.5;
         updateHud(true);
       }
     }
@@ -713,9 +735,31 @@
     updateReleaseCue();
   }
 
+  function getSealStatus(seal) {
+    return seal.collected ? "collected" : seal.missedNotified ? "missed" : "waiting";
+  }
+
+  function renderSealMarks(node, final = false) {
+    const markup = seals.map(seal => {
+      const status = final && !seal.collected ? "missed" : getSealStatus(seal);
+      const label = status === "collected" ? "alındı" : status === "missed" ? final ? "eksik" : "geçildi" : "ileride";
+      return `<li class="is-${status}" aria-label="Mühür ${seal.id}: ${label}" title="${seal.id}. mühür: ${label}">${seal.id}</li>`;
+    }).join("");
+    if (node.innerHTML !== markup) node.innerHTML = markup;
+  }
+
+  function getSealLocator() {
+    const seal = seals.find(item => getSealStatus(item) === "waiting");
+    if (!seal) return null;
+    const x = seal.x - cameraX;
+    if (x >= 36 && x <= W - 36) return null;
+    return { id: seal.id, side: x < 36 ? "left" : "right", y: Math.max(145, Math.min(H - 100, seal.y)) };
+  }
+
   function updateHud(force) {
     ui.score.textContent = formatScore(score);
     ui.seals.innerHTML = `${sealCount} <span>/ 3</span>`;
+    renderSealMarks(ui.sealMarks);
     ui.lives.setAttribute("aria-label", `${lives} can`);
     ui.lives.style.display = practiceIndex >= 0 ? "none" : "";
     [...ui.lives.children].forEach((dot, index) => dot.classList.toggle("empty", index >= lives));
@@ -760,6 +804,12 @@
       hint = target ? `Halkaya tutunmak için <kbd>${holdControl}</kbd> basılı tut` : "Sonraki halkaya yaklaş";
     }
     if (practiceIndex >= 0 && tetherAnchor && previewOn) hint += " · Noktalı yol: yaklaşık uçuş";
+    const routeSeal = tetherAnchor && seals.find(seal => seal.approachRing === tetherAnchor.id && getSealStatus(seal) === "waiting");
+    if (!recoveryReady && routeSeal) {
+      const routeTip = routeSeal.id === 1 ? "1. MÜHÜR AŞAĞIDA" : routeSeal.id === 2
+        ? "2. MÜHÜR ↑ · Daha uzun ip dene" : "3. MÜHÜR ↑ · İpi kısalt, daha geç bırak";
+      hint += ` · ${routeTip}`;
+    }
     ui.hint.innerHTML = hint;
     updateReleaseCue();
   }
@@ -901,6 +951,12 @@
       ctx.textAlign = "center";
       ctx.fillText(fragile ? "KIRILGAN" : "MAKARA", 0, -27);
     }
+    const routeSeal = seals.find(seal => seal.approachRing === anchor.id && getSealStatus(seal) === "waiting");
+    if (routeSeal && (!anchor.visited || latched)) {
+      ctx.shadowBlur = 0; ctx.fillStyle = "#ffc36b";
+      ctx.font = "800 9px Segoe UI, sans-serif"; ctx.textAlign = "center";
+      ctx.fillText(`${routeSeal.id}. MÜHÜR ${routeSeal.y > anchor.y + 80 ? "↓" : "→"}`, 0, -44);
+    }
     ctx.restore();
   }
 
@@ -916,7 +972,24 @@
     ctx.shadowBlur = 0; ctx.strokeStyle = "#684b2c"; ctx.lineWidth = 1.5;
     ctx.strokeRect(-9, -12, 18, 24);
     ctx.fillStyle = "#684b2c"; ctx.font = "bold 10px Segoe UI"; ctx.textAlign = "center";
-    ctx.fillText("S", 0, 4);
+    ctx.fillText(String(seal.id), 0, 4);
+    ctx.restore();
+  }
+
+  function drawSealLocator() {
+    if (state !== "playing" && state !== "paused") return;
+    const locator = getSealLocator();
+    if (!locator) return;
+    const x = locator.side === "right" ? W - 22 : 22;
+    const direction = locator.side === "right" ? 1 : -1;
+    ctx.save();
+    ctx.translate(x, locator.y);
+    ctx.fillStyle = "rgba(6,22,31,.82)";
+    ctx.strokeStyle = "#ffc36b"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(0, 0, 13, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#ffc36b"; ctx.font = "800 11px Segoe UI"; ctx.textAlign = "center";
+    ctx.fillText(String(locator.id), 0, 4);
+    ctx.beginPath(); ctx.moveTo(direction * 18, -4); ctx.lineTo(direction * 23, 0); ctx.lineTo(direction * 18, 4); ctx.stroke();
     ctx.restore();
   }
 
@@ -1116,6 +1189,7 @@
       }
       drawReleasePreview();
       drawPlayer(time);
+      drawSealLocator();
       for (const hazard of hazards) {
         const pos = hazardPosition(hazard);
         const dx = pos.x - player.x;
@@ -1297,6 +1371,7 @@
 
   ui.bestStart.textContent = formatScore(best);
   ui.bestTimeStart.textContent = formatRunTime(bestTime);
+  ui.deliveryTimeStart.textContent = formatRunTime(bestDeliveryTime);
   setPanels();
   requestAnimationFrame(frame);
 })();

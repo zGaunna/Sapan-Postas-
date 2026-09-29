@@ -4,7 +4,7 @@ const root = path.join(__dirname, "..");
 const source = fs.readFileSync(path.join(root, "game.js"), "utf8");
 const testSource = source.replace(/\}\)\(\);\s*$/, `
   globalThis.__playtest = {
-    resetRun, update, draw, frame, beginTether, releaseTether, keys, player, startRecovery, takeHit,
+    resetRun, update, draw, frame, beginTether, releaseTether, keys, player, seals, startRecovery, takeHit,
     state: () => state, recoveryReady: () => recoveryReady,
     tetherAnchor: () => tetherAnchor, ropeLength: () => ropeLength,
     runTime: () => runTime

@@ -3,6 +3,7 @@ work/backup-*/
 work/claude-handoff.md
 work/browser-playtest.html
 work/browser-playtest.js
+work/probe-*.cjs
 
 # Geçici dosyalar
 *.log
