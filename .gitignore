@@ -4,6 +4,8 @@ work/claude-handoff.md
 work/browser-playtest.html
 work/browser-playtest.js
 work/probe-*.cjs
+work/probe-*.py
+work/evidence/
 
 # Geçici dosyalar
 *.log

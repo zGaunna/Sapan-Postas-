@@ -112,18 +112,77 @@
   let tetherTime = 0;
   let fragileWarningPlayed = false;
   let practiceIndex = -1;
+  let targetPractice = null;
   let previewOn = true;
   let runStats = { hits: 0, cleanThrows: 0, ringBreaks: 0, segments: [0, 0, 0], hitLog: [] };
   let tutorialActive = false;
   let tutorialStep = 0;
   let tutorialTimer = 0;
-  let soundOn = false;
+  let soundOn = readPreference("sapan-postasi-sound") === "on";
   let audio = null;
   let steerPointer = new Map();
   let tetherPointerY = new Map();
   let tetherPointerId = null;
   let nearMissed = new Set();
   const player = { x: 165, y: 420, vx: 155, vy: -160, radius: 17 };
+  const courier = new CourierRig();
+  const effects = new MotionFX();
+  const previous = { x: player.x, y: player.y, camera: cameraX };
+  const rendered = { x: player.x, y: player.y };
+  let viewX = 0;
+  let renderAlpha = 1;
+  let visualTime = 0;
+  let ropePulse = 0;
+  let motionReduced = readPreference("sapan-postasi-motion") === "reduced" || readPreference("sapan-postasi-motion") !== "full" && Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
+  let socialDock = null;
+  let savedFlight = null;
+  let socialOrigin = "menu";
+  let pauseOrigin = "playing";
+  let mapOrigin = "exploring";
+  let logOrigin = "menu";
+  let conversation = null;
+  let delivered = false;
+  let stepSoundClock = 0;
+  const visitedDocks = new Set();
+  const socialUI = {
+    hud: document.querySelector("#social-hud"), place: document.querySelector("#social-place"),
+    contacts: document.querySelector("#social-contacts"), hint: document.querySelector("#social-hint"),
+    dialogue: document.querySelector("#dialogue"), name: document.querySelector("#dialogue-name"),
+    role: document.querySelector("#dialogue-role"), text: document.querySelector("#dialogue-text"),
+    choices: document.querySelector("#dialogue-choices"), map: document.querySelector("#harbor-map"),
+    leave: document.querySelector("#harbor-leave-button"), district: document.querySelector("#district-name"),
+    invite: document.querySelector("#dock-invite")
+  };
+
+  function socialVisible() {
+    return Boolean(socialDock && (state === "exploring" || state === "paused" && pauseOrigin === "exploring" || state === "map" && mapOrigin === "exploring" || state === "history" && logOrigin === "exploring"));
+  }
+
+  function readPreference(key) { try { return localStorage.getItem(key); } catch { return null; } }
+  function savePreference(key, value) { try { localStorage.setItem(key, value); } catch { /* Session preference still works. */ } }
+
+  function poseInput(ax = 0, ay = 0) {
+    const target = tetherAnchor || nearestAnchor()?.anchor;
+    const distance = target ? Math.hypot(player.x - target.x, player.y - target.y) : 0;
+    return { vx: player.vx, vy: player.vy, ax, ay, steer: activeSteer(), reel: activeReel(),
+      grounded: socialVisible(), talking: Boolean(conversation),
+      lookDirection: conversation ? Math.sign(conversation.person.x - player.x) : 0,
+      attached: Boolean(tetherAnchor), anchorDX: target ? target.x - player.x : 0,
+      anchorDY: target ? target.y - player.y : -1, taut: Boolean(tetherAnchor && distance >= ropeLength - 3),
+      boost: socialVisible() ? 0 : Math.min(1, boostTime / SLING.seconds), waiting: socialVisible() ? Math.abs(player.vx) < 1 : recoveryReady,
+      menu: state === "menu" || state === "won" || state === "lost" };
+  }
+
+  function syncVisualPosition() {
+    previous.x = rendered.x = player.x; previous.y = rendered.y = player.y;
+    previous.camera = viewX = cameraX; renderAlpha = 1;
+    effects.clearTrail();
+  }
+
+  function motionEvent(kind, x = player.x, y = player.y, strength = 1) {
+    courier.event(kind, strength);
+    effects.burst(kind, x, y, player.vx, player.vy, strength);
+  }
 
   function readBest() {
     try {
@@ -245,13 +304,21 @@
     ui.start.hidden = state !== "menu";
     ui.pause.hidden = state !== "paused";
     ui.result.hidden = state !== "won" && state !== "lost";
-    ui.touch.hidden = state !== "playing" || !("ontouchstart" in window || navigator.maxTouchPoints > 0);
+    ui.touch.hidden = true;
     ui.previewButton.hidden = state !== "playing" || practiceIndex < 0;
+    socialUI.hud.hidden = !socialVisible() || state !== "exploring";
+    socialUI.dialogue.hidden = !conversation || state !== "exploring";
+    socialUI.map.hidden = state !== "map";
+    document.querySelector("#voyage-log").hidden = state !== "history";
+    socialUI.invite.hidden = state !== "playing" || !nearbyDock();
+    document.querySelector("#restart-button").textContent = state === "paused" && pauseOrigin === "exploring" ? "İskele girişine dön" : "Baştan başla";
     updateReleaseCue();
     updateTutorialPrompt();
   }
 
   function resetRun(startIndex = practiceIndex) {
+    targetPractice = null;
+    socialDock = null; savedFlight = null; conversation = null; delivered = false;
     if (!Number.isInteger(startIndex) || startIndex < -1 || startIndex >= practiceStarts.length) startIndex = -1;
     practiceIndex = startIndex;
     const startX = practiceIndex < 0 ? practiceStarts[0] : practiceStarts[practiceIndex];
@@ -278,6 +345,8 @@
     tutorialActive = practiceIndex < 0 && !hasCompletedTutorial(); tutorialStep = 0; tutorialTimer = 0;
     steerPointer.clear(); tetherPointerY.clear(); tetherPointerId = null; keys.clear();
     state = "playing";
+    effects.reset(); effects.reduced = motionReduced; ropePulse = 0;
+    syncVisualPosition(); courier.reset(poseInput());
     resetFrameClock();
     ui.combo.textContent = "";
     setPanels();
@@ -285,8 +354,32 @@
     playTone(540, 0.075, "sine");
   }
 
+  function startSealPractice(id) {
+    const seal = seals.find(item => item.id === id);
+    if (!seal) return false;
+    resetRun(0);
+    const anchor = anchors[seal.approachRing];
+    targetPractice = { id, x: anchor.x - 150, y: anchor.y + 140, vx: 185, vy: -70 };
+    Object.assign(player, { x: targetPractice.x, y: targetPractice.y, vx: targetPractice.vx, vy: targetPractice.vy });
+    checkpointX = targetPractice.x;
+    for (const ring of anchors) ring.visited = ring.x < checkpointX - 85;
+    cameraX = Math.max(0, player.x - W * 0.36);
+    recoveryReady = true;
+    ui.combo.textContent = `${id}. MÜHÜR · Hazır olunca SPACE`;
+    messageUntil = 3;
+    syncVisualPosition(); courier.reset(poseInput()); resetFrameClock(); updateHud(true);
+    return true;
+  }
+
+  function restartCurrentRun() {
+    if (state === "paused" && pauseOrigin === "exploring" && socialDock) { enterHarbor(socialDock.id); return; }
+    if (targetPractice) startSealPractice(targetPractice.id);
+    else resetRun();
+  }
+
   function pauseGame() {
-    if (state !== "playing") return;
+    if (state !== "playing" && state !== "exploring") return;
+    pauseOrigin = state;
     state = "paused";
     resetFrameClock();
     setPanels();
@@ -294,16 +387,21 @@
 
   function resumeGame() {
     if (state !== "paused") return;
-    state = "playing";
+    state = pauseOrigin;
     resetFrameClock();
     setPanels();
   }
 
   function finishRun(won, reason = null) {
     if (state !== "playing") return;
+    if (targetPractice && won && !seals.find(seal => seal.id === targetPractice.id)?.collected) {
+      won = false; reason = "target-missed";
+    }
     releaseTether({ award: false, consumeAnchor: false });
     boostTime = 0;
     state = won ? "won" : "lost";
+    delivered = won && practiceIndex < 0 && sealCount === 3;
+    if (won) motionEvent("finish");
     if (won && practiceIndex < 0) score += 500 + (sealCount === 3 ? 300 : 0) + Math.floor(remaining * 2);
     const previousBest = best;
     if (practiceIndex < 0) saveBest(score);
@@ -314,7 +412,10 @@
     ui.finalThrows.textContent = String(runStats.cleanThrows);
     let timeRecord = false;
     let deliveryRecord = false;
-    if (won) splitTimes.push({ name: "Fener iskelesi", at: runTime });
+    if (won && !targetPractice) splitTimes.push({ name: "Fener iskelesi", at: runTime });
+    VoyageLog.record({ mode: globalThis.__playtestRun ? "test" : practiceIndex < 0 ? "normal" : "practice",
+      won, seals: sealCount, score, time: runTime, hits: runStats.hits, cleanThrows: runStats.cleanThrows,
+      splits: splitTimes.map(split => split.at), reason });
     if (won && practiceIndex < 0) {
       try {
         const result = saveBestRunTime(localStorage, runTime);
@@ -364,7 +465,168 @@
         : "Canların bitti. Zorlandığın kısmı antrenmanda yeniden deneyebilirsin.";
       playTone(190, 0.3, "sawtooth");
     }
+    if (targetPractice && won) {
+      ui.resultKicker.textContent = "MÜHÜR ANTRENMANI TAMAM";
+      ui.resultTitle.textContent = `${targetPractice.id}. mührü aldın.`;
+      ui.resultCopy.textContent = "Aynı atışı tekrar çalışabilir veya normal vardiyada deneyebilirsin.";
+      ui.splits.hidden = true;
+    } else if (targetPractice) {
+      ui.resultKicker.textContent = "MÜHÜR ANTRENMANI";
+      ui.resultTitle.textContent = "Mühür geride kaldı.";
+      ui.resultCopy.textContent = "R veya Yeniden oyna ile aynı atışı tekrar dene. Normal vardiya kayıtların etkilenmez.";
+      ui.splits.hidden = true;
+    }
+    document.querySelector("#result-practice").hidden = practiceIndex >= 0 || seals.every(seal => seal.collected);
+    document.querySelector("#normal-shift-button").hidden = !targetPractice;
+    document.querySelector("#replay-button").textContent = targetPractice ? "Atışı yeniden dene ↗" : "Yeniden oyna ↗";
+    for (const button of document.querySelectorAll("#result-practice [data-seal-practice]")) {
+      button.hidden = seals.find(seal => seal.id === Number(button.dataset.sealPractice))?.collected !== false;
+    }
     setPanels();
+  }
+
+  function nearbyDock() {
+    if (state !== "playing") return null;
+    return HarborWorld.docks.find(dock => Math.abs(player.x - dock.x) < 260 && player.y > 200 && player.y < 600) || null;
+  }
+
+  function enterHarbor(id = "rihtim") {
+    const dock = HarborWorld.docks.find(item => item.id === id);
+    if (!dock) return false;
+    if (state === "playing") {
+      savedFlight = { player: { ...player }, camera: cameraX, recoveryReady, invulnerable, boostTime,
+        tether: { held: tetherHeld, anchor: tetherAnchor, length: ropeLength, rate: ropeLengthRate, time: tetherTime, warning: fragileWarningPlayed },
+        blockedKeys: [...recoveryBlockedKeys] };
+      releaseTether({ award: false, consumeAnchor: false });
+      socialOrigin = "playing";
+    } else if (!socialVisible()) {
+      socialOrigin = state === "won" || state === "lost" ? state : "menu";
+      savedFlight = null;
+    }
+    socialDock = dock; visitedDocks.add(dock.id); conversation = null;
+    state = "exploring";
+    keys.clear(); recoveryBlockedKeys.clear();
+    player.x = dock.id === "rihtim" ? 170 : dock.x - 120;
+    player.y = dock.floor - 28; player.vx = 0; player.vy = 0;
+    cameraX = Math.max(0, dock.x - W * 0.45);
+    courier.reset(poseInput()); resetFrameClock(); setPanels(); updateSocialHud();
+    return true;
+  }
+
+  function leaveHarbor() {
+    if (!socialDock) return;
+    conversation = null; socialDock = null; keys.clear();
+    if (savedFlight && socialOrigin === "playing") {
+      Object.assign(player, savedFlight.player); cameraX = savedFlight.camera;
+      recoveryReady = savedFlight.recoveryReady; invulnerable = savedFlight.invulnerable; boostTime = savedFlight.boostTime;
+      tetherHeld = savedFlight.tether.held; tetherAnchor = savedFlight.tether.anchor;
+      ropeLength = savedFlight.tether.length; ropeLengthRate = savedFlight.tether.rate;
+      tetherTime = savedFlight.tether.time; fragileWarningPlayed = savedFlight.tether.warning;
+      recoveryBlockedKeys.clear(); for (const key of savedFlight.blockedKeys) recoveryBlockedKeys.add(key);
+      state = "playing";
+    } else state = socialOrigin;
+    savedFlight = null;
+    courier.reset(poseInput()); resetFrameClock(); setPanels(); updateHud(true);
+  }
+
+  function updateSocialHud() {
+    if (!socialDock) return;
+    socialUI.place.textContent = socialDock.name;
+    socialUI.contacts.textContent = `${HarborSocial.contacts().length} / ${HarborSocial.people.length} kişiyle tanıştın`;
+    socialUI.leave.textContent = socialOrigin === "playing" ? "Vardiyaya dön" : socialOrigin === "menu" ? "Ana menü" : "Sonuçlara dön";
+    const target = HarborSocial.nearest(socialDock.id, player.x);
+    socialUI.hint.textContent = conversation ? "1 / 2 / 3: cevap ver · ESC: konuşmayı bitir" : target
+      ? `E · ${target.name} ${target.look ? "ile konuş" : "incele"} · A / D: yürü`
+      : "A / D: yürü · Shift: hızlı yürü · E: konuş / incele · M: harita";
+  }
+
+  function updateSocial(dt) {
+    if (state !== "exploring" || !socialDock) return;
+    previous.x = player.x; previous.y = player.y; previous.camera = cameraX;
+    const oldVX = player.vx;
+    const speed = keys.has("ShiftLeft") || keys.has("ShiftRight") ? 260 : 170;
+    const desired = conversation ? 0 : activeSteer() * speed;
+    player.vx += (desired - player.vx) * (1 - Math.exp(-14 * dt));
+    if (Math.abs(player.vx) < 0.5) player.vx = 0;
+    player.x = Math.max(socialDock.left + 20, Math.min(socialDock.right - 20, player.x + player.vx * dt));
+    if (player.x === socialDock.left + 20 || player.x === socialDock.right - 20) player.vx = 0;
+    player.y = socialDock.floor - 28; player.vy = 0;
+    const targetCamera = Math.max(0, player.x - W * 0.45);
+    cameraX += (targetCamera - cameraX) * (1 - Math.exp(-5 * dt));
+    courier.update(dt, poseInput(dt > 0 ? (player.vx - oldVX) / dt : 0, 0));
+    effects.update(dt, null, 0, false);
+    if (Math.abs(player.vx) > 60) {
+      stepSoundClock += dt * Math.abs(player.vx) / 170;
+      if (stepSoundClock > 0.29) { stepSoundClock = 0; playTone(80, 0.028, "triangle", 0, 0.025); }
+    } else stepSoundClock = 0;
+    updateSocialHud();
+  }
+
+  function openConversation(id = null) {
+    if (state !== "exploring" || !socialDock) return false;
+    const target = HarborSocial.nearest(socialDock.id, player.x);
+    if (!target || id && target.id !== id) return false;
+    const node = HarborSocial.getNode(target.id, "start", { delivered });
+    if (!node) return false;
+    conversation = node; player.vx = 0; keys.clear();
+    HarborSocial.remember(target.id);
+    if (target.id === "zil") { playTone(740, 0.28, "sine", 0, 0.045); playTone(1110, 0.32, "sine", 0.08, 0.025); }
+    renderConversation(); setPanels(); updateSocialHud();
+    return true;
+  }
+
+  function renderConversation() {
+    if (!conversation) return;
+    socialUI.dialogue.dataset.side = (player.x + conversation.person.x) / 2 - cameraX < W / 2 ? "right" : "left";
+    socialUI.name.textContent = conversation.person.name;
+    socialUI.role.textContent = conversation.person.role || "Çevrene bakıyorsun";
+    socialUI.text.textContent = conversation.text;
+    const escape = value => String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;");
+    socialUI.choices.innerHTML = conversation.choices.map((item, i) => `<button type="button" data-answer="${i}"><kbd>${i + 1}</kbd>${escape(item.text)}</button>`).join("");
+    for (const button of document.querySelectorAll("[data-answer]")) button.addEventListener("click", () => chooseConversation(Number(button.dataset.answer)));
+  }
+
+  function chooseConversation(index) {
+    if (!conversation || state !== "exploring" || !Number.isInteger(index)) return;
+    const answer = conversation.choices[index];
+    if (!answer) return;
+    if (answer.next === null) closeConversation();
+    else {
+      const node = HarborSocial.getNode(conversation.person.id, answer.next, { delivered });
+      if (node) { conversation = node; renderConversation(); }
+    }
+  }
+
+  function closeConversation() { conversation = null; keys.clear(); setPanels(); updateSocialHud(); }
+
+  function toggleMap() {
+    if (state === "map") { state = mapOrigin; resetFrameClock(); setPanels(); return; }
+    if (!["playing", "exploring", "menu"].includes(state)) return;
+    mapOrigin = state; state = "map"; keys.clear(); resetFrameClock(); setPanels();
+    document.querySelector("#map-copy").textContent = mapOrigin === "playing"
+      ? "Vardiya duraklatıldı. İskeleye uğrarsan aynı noktadan yola dönebilirsin."
+      : "Bir iskele seçip yürüyerek etrafına bak.";
+    HarborWorld.drawMap(document.querySelector("#map-chart").getContext("2d"), mapOrigin === "menu" ? 150 : player.x, [...visitedDocks]);
+  }
+
+  function toggleLog() {
+    if (state === "history") { state = logOrigin; resetFrameClock(); setPanels(); return; }
+    if (!["menu", "won", "lost", "playing", "exploring"].includes(state)) return;
+    logOrigin = state; state = "history"; keys.clear(); resetFrameClock(); setPanels();
+    const runs = VoyageLog.list();
+    document.querySelector("#log-empty").hidden = runs.length > 0;
+    document.querySelector("#log-table").hidden = runs.length === 0;
+    document.querySelector("#log-rows").innerHTML = runs.map(run => {
+      const at = new Date(run.at).toLocaleString("tr-TR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" });
+      const outcome = run.won ? run.seals === 3 ? "Teslim edildi" : "Fenere vardın" : run.reason === "timeout" ? "Süre doldu" : "Yarım kaldı";
+      return `<tr><td>${at}</td><td>${outcome}</td><td>${run.seals}/3</td><td>${formatRunTime(run.time)}</td><td>${formatScore(run.score)}</td><td>${run.cleanThrows}</td><td>${run.hits}</td></tr>`;
+    }).join("");
+  }
+
+  function travelToDock(id) {
+    if (!HarborWorld.docks.some(dock => dock.id === id)) return false;
+    if (state === "map") { state = mapOrigin; }
+    return enterHarbor(id);
   }
 
   function nearestAnchor() {
@@ -399,6 +661,8 @@
       updateTutorialPrompt();
     }
     score += 10;
+    ropePulse = 1;
+    motionEvent("attach", tetherAnchor.x, tetherAnchor.y);
     playTone(430, 0.055, "sine");
     updateHud(true);
   }
@@ -426,6 +690,7 @@
     player.vx += player.vx / speed * impulse;
     player.vy += player.vy / speed * impulse;
     boostTime = SLING.seconds;
+    motionEvent("boost");
     limitPlayerSpeed();
     ui.combo.textContent += ` · SAPAN +${Math.round(impulse)}`;
     playTone(520 + quality * 260, 0.12, "triangle", 0.03);
@@ -440,12 +705,13 @@
   }
 
   function releaseTether({ award = true, consumeAnchor = true } = {}) {
-    if (state === "paused") { award = false; consumeAnchor = false; }
+    if (state !== "playing") { award = false; consumeAnchor = false; }
     if (!tetherHeld && !tetherAnchor) return;
     const teachSteering = tutorialActive && tutorialStep === 1 && award && Boolean(tetherAnchor);
     tetherHeld = false;
     if (ui.tetherTouch) ui.tetherTouch.classList.remove("is-held");
     if (tetherAnchor) {
+      if (award) motionEvent("release");
       if (consumeAnchor) tetherAnchor.visited = true;
       if (award && isCleanRelease(tetherAnchor)) {
         runStats.cleanThrows += 1;
@@ -592,6 +858,7 @@
     const remainingHold = FRAGILE_HOLD_SECONDS - tetherTime;
     if (remainingHold <= 0) {
       runStats.ringBreaks += 1;
+      motionEvent("break", tetherAnchor.x, tetherAnchor.y);
       releaseTether({ award: false });
       ui.combo.textContent = "KIRILGAN HALKA KOPTU";
       messageUntil = elapsed + 1.1;
@@ -611,6 +878,7 @@
 
   function takeHit(reason = "water") {
     if (state !== "playing" || (recoveryReady && reason !== "retry") || (invulnerable > 0 && reason === "hazard")) return;
+    if (reason !== "retry") motionEvent(reason === "water" ? "water" : "hurt");
     if (reason !== "retry") {
       const segment = checkpoints.filter(mark => checkpointX >= mark).length;
       runStats.hits += 1;
@@ -632,14 +900,15 @@
     }
     if (lives <= 0) { updateHud(true); finishRun(false, reason); return; }
     boostTime = 0;
-    player.x = checkpointX;
-    player.y = 430;
-    player.vx = 185;
+    player.x = targetPractice ? targetPractice.x : checkpointX;
+    player.y = targetPractice ? targetPractice.y : 430;
+    player.vx = targetPractice ? targetPractice.vx : 185;
     for (const seal of seals) if (!seal.collected && seal.x > checkpointX) seal.missedNotified = false;
-    player.vy = -70;
-    cameraX = Math.max(0, checkpointX - W * 0.34);
+    player.vy = targetPractice ? targetPractice.vy : -70;
+    cameraX = Math.max(0, player.x - W * 0.34);
     invulnerable = 0;
     recoveryReady = true;
+    syncVisualPosition(); courier.reset(poseInput()); courier.event("hurt", reason === "retry" ? 0 : 1);
     const cause = { water: "SUYA DÜŞTÜN", hazard: "ŞAMANDIRAYA ÇARPTIN", ceiling: "FAZLA YÜKSELDİN", backtrack: "HATTIN GERİSİNE DÜŞTÜN", retry: "TEKRAR DENEME" };
     ui.combo.textContent = `${cause[reason] || "İSKELEYE DÖNDÜN"} · SON İSKELE`;
     messageUntil = elapsed + 1.6;
@@ -649,6 +918,8 @@
 
   function update(dt) {
     if (recoveryReady) return;
+    previous.x = player.x; previous.y = player.y; previous.camera = cameraX;
+    const oldVX = player.vx, oldVY = player.vy;
     elapsed += dt;
     const steer = activeSteer();
     if (tutorialActive && tutorialStep === 2 && steer !== 0) completeTutorial();
@@ -679,14 +950,17 @@
 
     for (let i = 0; i < seals.length; i += 1) {
       const seal = seals[i];
+      if (targetPractice && seal.id !== targetPractice.id) continue;
       if (!seal.collected && Math.hypot(player.x - seal.x, player.y - seal.y) < 36) {
         seal.collected = true;
         sealCount += 1;
         score += 50;
+        motionEvent("seal", seal.x, seal.y);
         ui.combo.textContent = `${seal.id}. MÜHÜR ALINDI · ${sealCount}/3`;
         messageUntil = elapsed + 1.1;
         playTone(880, 0.11, "sine");
         updateHud(true);
+        if (targetPractice) { finishRun(true, "target"); return; }
       }
       if (!seal.collected && player.x > seal.x + 60 && !seal.missedNotified) {
         seal.missedNotified = true;
@@ -694,6 +968,7 @@
         messageUntil = elapsed + 1.5;
         updateHud(true);
       }
+      if (targetPractice && !seal.collected && player.x > seal.x + 150) { finishRun(false, "target-missed"); return; }
     }
 
     let hitThisFrame = false;
@@ -706,6 +981,7 @@
         nearMissed.add(hazard.x);
         combo = Math.min(8, combo + 1);
         score += 15 * combo;
+        effects.burst("release", player.x, player.y, player.vx, player.vy, 0.65);
         ui.combo.textContent = `KIL PAYI  ×${combo}`;
         messageUntil = elapsed + 1;
         updateHud(true);
@@ -717,9 +993,10 @@
       else if (player.y < -110) takeHit("ceiling");
       else if (player.x < checkpointX - 180) takeHit("backtrack");
     }
-    for (const mark of checkpoints) {
+    for (const mark of targetPractice ? [] : checkpoints) {
       if (player.x >= mark && checkpointX < mark) {
         checkpointX = mark;
+        motionEvent("checkpoint", mark, player.y);
         splitTimes.push({ name: mark === checkpoints[0] ? "Orta iskele" : "Fener hattı", at: runTime });
         lives = Math.min(3, lives + 1);
         ui.combo.textContent = `GÜVENLİ İSKELE · ${formatRunTime(runTime)}`;
@@ -733,6 +1010,11 @@
 
     if (hudClock >= 0.1) { hudClock = 0; updateHud(false); }
     updateReleaseCue();
+    if (!recoveryReady) {
+      courier.update(dt, poseInput(dt > 0 ? (player.vx - oldVX) / dt : 0, dt > 0 ? (player.vy - oldVY) / dt : 0));
+      effects.update(dt, player, boostTime, state === "playing");
+      ropePulse = Math.max(0, ropePulse - dt * 2.7);
+    }
   }
 
   function getSealStatus(seal) {
@@ -748,15 +1030,18 @@
     if (node.innerHTML !== markup) node.innerHTML = markup;
   }
 
-  function getSealLocator() {
-    const seal = seals.find(item => getSealStatus(item) === "waiting");
+  function getSealLocator(camera = cameraX) {
+    const seal = seals.find(item => (!targetPractice || item.id === targetPractice.id) && getSealStatus(item) === "waiting");
     if (!seal) return null;
-    const x = seal.x - cameraX;
+    const x = seal.x - camera;
     if (x >= 36 && x <= W - 36) return null;
     return { id: seal.id, side: x < 36 ? "left" : "right", y: Math.max(145, Math.min(H - 100, seal.y)) };
   }
 
   function updateHud(force) {
+    socialUI.district.textContent = HarborWorld.districtAt(player.x)?.name || "";
+    socialUI.invite.hidden = state !== "playing" || !nearbyDock();
+    document.querySelector(".route-label").textContent = targetPractice ? `${targetPractice.id}. MÜHÜRÜ ÇALIŞ` : "FENER İSKELESİ";
     ui.score.textContent = formatScore(score);
     ui.seals.innerHTML = `${sealCount} <span>/ 3</span>`;
     renderSealMarks(ui.sealMarks);
@@ -766,6 +1051,7 @@
     const progress = Math.max(0, Math.min(1, player.x / ROUTE_END));
     ui.routeFill.style.width = `${progress * 100}%`;
     ui.routeMarker.style.left = `${progress * 100}%`;
+    updateRouteMap();
     ui.rope.hidden = !tetherAnchor;
     if (tetherAnchor) {
       ui.ropeLength.textContent = String(Math.round(ropeLength));
@@ -773,7 +1059,7 @@
       ui.rope.setAttribute("aria-label", `Halat uzunluğu ${Math.round(ropeLength)} piksel`);
     }
     const seconds = Math.ceil(remaining);
-    ui.clock.textContent = practiceIndex >= 0 ? "ANTRENMAN" : tutorialActive ? "EĞİTİM" : `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")} KALAN`;
+    ui.clock.textContent = targetPractice ? "R: AYNI ATIŞI YENİDEN DENE" : practiceIndex >= 0 ? "ANTRENMAN" : tutorialActive ? "EĞİTİM" : `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")} KALAN`;
     ui.runTime.textContent = `GEÇEN ${formatRunTime(runTime)}`;
     ui.previewButton.setAttribute("aria-pressed", String(previewOn));
     ui.previewButton.title = previewOn ? "Uçuş yolunu gizle (G)" : "Uçuş yolunu göster (G)";
@@ -815,82 +1101,88 @@
   }
 
   function drawBackground(time) {
-    const sky = ctx.createLinearGradient(0, 0, 0, H);
-    sky.addColorStop(0, "#091d2b");
-    sky.addColorStop(0.62, "#143342");
-    sky.addColorStop(1, "#09212c");
-    ctx.fillStyle = sky;
-    ctx.fillRect(0, 0, W, H);
+    const district = socialVisible() ? HarborWorld.districts.find(region => region.id === socialDock.id) : null;
+    const focus = district ? (district.from + district.to) / 2 : state === "menu" ? 150 : rendered.x;
+    HarborWorld.drawBackground(ctx, viewX, time, focus);
+  }
 
-    for (const star of stars) {
-      const x = (star.x - cameraX * 0.035 + W * 3) % W;
-      ctx.globalAlpha = star.a * (0.86 + Math.sin(time * 0.7 + star.x) * 0.14);
-      ctx.fillStyle = "#e4eee5";
-      ctx.beginPath(); ctx.arc(x, star.y, star.r, 0, Math.PI * 2); ctx.fill();
+  function updateRouteMap() {
+    const percent = x => (Math.max(0, Math.min(ROUTE_END, x)) / ROUTE_END * 100).toFixed(3);
+    const segments = document.querySelector("#map-segments");
+    if (!segments.innerHTML) segments.innerHTML = HarborWorld.districts.map((district, i) =>
+      `<span style="width:${percent(district.to - district.from)}%;background:${["#547e77","#86946b","#b18b55","#537d9a","#827597"][i]}" title="${district.name}"></span>`).join("");
+    const checkpointMarks = checkpoints.map(mark => `<b class="map-checkpoint${checkpointX >= mark ? " is-reached" : ""}" style="left:${percent(mark)}%" title="Güvenli iskele"></b>`);
+    const sealMarks = seals.map(seal => `<b class="map-seal is-${getSealStatus(seal)}${seal.id === targetPractice?.id ? " is-target" : ""}" style="left:${percent(seal.x)}%" title="${seal.id}. mühür">${seal.id}</b>`);
+    const specialMarks = anchors.filter(anchor => anchor.type !== "normal").map(anchor => `<b class="map-special is-${anchor.type}${anchor.visited ? " is-visited" : ""}" style="left:${percent(anchor.x)}%" title="${anchor.type === "fragile" ? "Kırılgan halka" : "Makara"}">${anchor.type === "fragile" ? "×" : "⌄"}</b>`);
+    const landmarks = document.querySelector("#map-landmarks");
+    const markup = [...checkpointMarks, ...sealMarks, ...specialMarks].join("");
+    if (landmarks.innerHTML !== markup) landmarks.innerHTML = markup;
+    const upcoming = [...seals.filter(seal => !seal.collected && seal.x >= player.x).map(seal => ({x:seal.x,name:`${seal.id}. mühür`})),
+      ...checkpoints.filter(mark => mark > checkpointX).map(mark => ({x:mark,name:"güvenli iskele"})),{x:ROUTE_END,name:"fener iskelesi"}].sort((a,b) => a.x-b.x)[0];
+    const next = document.querySelector("#map-next");
+    next.textContent = targetPractice ? `HEDEF · ${targetPractice.id}. mühür` : `İleride · ${upcoming.name}`;
+    document.querySelector("#route-map").setAttribute("aria-label", `${HarborWorld.districtAt(player.x)?.name || "Liman"}. Rotanın yüzde ${Math.round(Math.max(0,Math.min(1,player.x/ROUTE_END))*100)} kadarı geçildi. ${next.textContent}. ${sealCount}/3 mühür alındı.`);
+  }
+
+  function drawSocialWorld(time) {
+    HarborWorld.drawDock(ctx, socialDock, viewX, time, true);
+    const target = HarborSocial.nearest(socialDock.id, player.x);
+    for (const npc of HarborSocial.people.filter(person => person.dock === socialDock.id)) {
+      HarborWorld.drawNPC(ctx, { ...npc, y: socialDock.floor - 28, facing: target?.id === npc.id ? Math.sign(player.x - npc.x) : 1 }, viewX, time, target?.id === npc.id);
     }
-    ctx.globalAlpha = 1;
-
-    ctx.save();
-    ctx.shadowColor = "rgba(255,195,107,.35)";
-    ctx.shadowBlur = 45;
-    ctx.fillStyle = "#f0d7a6";
-    ctx.beginPath(); ctx.arc(1010, 152, 49, 0, Math.PI * 2); ctx.fill();
-    ctx.restore();
-    ctx.fillStyle = "rgba(9,28,38,.32)";
-    ctx.beginPath(); ctx.arc(992, 139, 44, 0, Math.PI * 2); ctx.fill();
-
-    const parallax = (cameraX * 0.18) % 2184;
-    ctx.fillStyle = "#102a35";
-    for (let repeat = -1; repeat < 3; repeat += 1) {
-      for (const building of skyline) {
-        const x = repeat * 2184 + building.x - parallax;
-        const y = 534 - building.h;
-        ctx.fillRect(x, y, building.w, building.h);
-        if (building.lit === 0) {
-          ctx.fillStyle = "rgba(255,195,107,.25)";
-          ctx.fillRect(x + 8, y + 18, 3, 5);
-          ctx.fillStyle = "#102a35";
+    for (const object of HarborSocial.objects.filter(item => item.dock === socialDock.id)) {
+      const x = object.x - viewX, y = socialDock.floor;
+      ctx.save(); ctx.translate(x, y);
+      ctx.fillStyle = "#695c46"; ctx.strokeStyle = "#a48e68"; ctx.lineWidth = 2;
+      if (object.kind === "bell") {
+        ctx.fillRect(-3, -65, 6, 65); ctx.fillRect(-3, -65, 28, 4);
+        ctx.fillStyle = "#c7a265";
+        ctx.beginPath(); ctx.moveTo(13, -60); ctx.quadraticCurveTo(7, -50, 7, -44);
+        ctx.lineTo(28, -44); ctx.quadraticCurveTo(28, -50, 23, -60); ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = "#cfd8bd"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(19, -44); ctx.lineTo(19, -19); ctx.stroke();
+      } else if (object.kind === "board") {
+        ctx.fillRect(-3, -58, 6, 58); ctx.fillRect(-24, -67, 48, 33);
+        ctx.fillStyle = "#d4c4a0"; ctx.fillRect(-18, -62, 22, 23); ctx.fillRect(6, -59, 12, 17);
+        ctx.strokeStyle = "#756950"; ctx.lineWidth = 1;
+        for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.moveTo(-14, -56+i*5); ctx.lineTo(0, -56+i*5); ctx.stroke(); }
+      } else {
+        ctx.fillRect(-27, -29, 54, 5); ctx.fillRect(-23, -24, 5, 24); ctx.fillRect(18, -24, 5, 24);
+        if (object.kind === "book") {
+          ctx.fillStyle = "#b78758"; ctx.fillRect(-12, -39, 25, 10);
+          ctx.fillStyle = "#e6d5b4"; ctx.fillRect(-10, -37, 21, 5);
+          ctx.strokeStyle = "#7c6350"; ctx.beginPath(); ctx.moveTo(0, -37); ctx.lineTo(0, -31); ctx.stroke();
+        } else {
+          ctx.strokeStyle = "#9aadb0"; ctx.lineWidth = 3;
+          ctx.beginPath(); ctx.moveTo(-19, -36); ctx.lineTo(10, -32); ctx.stroke();
+          ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(17, -37, 7, 0, Math.PI*2); ctx.stroke();
         }
       }
+      ctx.fillStyle = "#eed0a2"; ctx.font = "600 10px Segoe UI"; ctx.textAlign = "center";
+      if (target?.id === object.id) { ctx.fillText(object.name, 0, -54); }
+      ctx.restore();
     }
-
-    const water = ctx.createLinearGradient(0, 560, 0, 720);
-    water.addColorStop(0, "#0c2a36"); water.addColorStop(1, "#061923");
-    ctx.fillStyle = water; ctx.fillRect(0, 556, W, 164);
-    ctx.strokeStyle = "rgba(108,185,181,.12)";
-    ctx.lineWidth = 1;
-    for (let row = 0; row < 7; row += 1) {
-      const y = 576 + row * 22;
-      ctx.beginPath();
-      for (let x = 0; x <= W; x += 18) {
-        const wave = Math.sin(x * 0.022 + time * 0.75 + row) * 4;
-        if (x === 0) ctx.moveTo(x, y + wave); else ctx.lineTo(x, y + wave);
-      }
-      ctx.stroke();
+    if (target && !conversation) {
+      ctx.save(); ctx.translate(target.x - viewX, socialDock.floor - (target.look ? 133 : 97));
+      ctx.fillStyle = "#ffd190"; ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#15313a"; ctx.font = "800 11px Segoe UI"; ctx.textAlign = "center"; ctx.fillText("E", 0, 4);
+      ctx.restore();
     }
-    ctx.fillStyle = "#182e34";
-    ctx.fillRect(0, 627, W, 16);
-    ctx.fillStyle = "#334b4d";
-    ctx.fillRect(0, 627, W, 4);
-    const postOffset = (cameraX * 0.68) % 170;
-    for (let x = -postOffset - 60; x < W + 80; x += 170) {
-      ctx.fillStyle = "#1a3036";
-      ctx.fillRect(x + 14, 642, 22, 82);
-      ctx.fillStyle = "#385154";
-      ctx.fillRect(x + 12, 641, 26, 7);
-    }
+    drawPlayer();
   }
 
   function drawCheckpoint(mark, index) {
-    const x = mark - cameraX;
+    const x = mark - viewX;
     if (x < -110 || x > W + 110) return;
     const reached = checkpointX >= mark;
     ctx.save();
+    drawSafeDock(x, 460, reached);
     ctx.strokeStyle = reached ? "rgba(85,214,207,.58)" : "rgba(255,195,107,.65)";
     ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(x, 464); ctx.lineTo(x, 628); ctx.stroke();
     ctx.fillStyle = reached ? "#55d6cf" : "#ffc36b";
-    ctx.beginPath(); ctx.moveTo(x, 463); ctx.lineTo(x + 42, 478); ctx.lineTo(x, 493); ctx.closePath(); ctx.fill();
+    const flutter = Math.sin(visualTime * 3.6 + index) * 3;
+    ctx.beginPath(); ctx.moveTo(x, 463); ctx.quadraticCurveTo(x + 19, 474 + flutter, x + 42, 478 + flutter);
+    ctx.quadraticCurveTo(x + 19, 484 + flutter, x, 493); ctx.closePath(); ctx.fill();
     ctx.fillStyle = "#e8eee3";
     ctx.font = "700 10px Segoe UI, sans-serif";
     ctx.textAlign = "center";
@@ -898,14 +1190,31 @@
     ctx.restore();
   }
 
+  function drawSafeDock(x, y, reached = false) {
+    ctx.save(); ctx.fillStyle = "#213b40";
+    ctx.fillRect(x - 55, y + 8, 110, 12);
+    ctx.fillRect(x - 42, y + 16, 8, 628 - y); ctx.fillRect(x + 32, y + 16, 8, 628 - y);
+    ctx.fillStyle = "#777563"; ctx.fillRect(x - 59, y, 118, 5);
+    ctx.strokeStyle = "rgba(14,31,34,.8)"; ctx.lineWidth = 1;
+    for (let offset = -43; offset < 55; offset += 22) {
+      ctx.beginPath(); ctx.moveTo(x + offset, y); ctx.lineTo(x + offset, y + 5); ctx.stroke();
+    }
+    ctx.fillStyle = reached ? "#78d2bc" : "#cfab6d"; ctx.fillRect(x + 45, y - 20, 4, 18);
+    ctx.fillStyle = reached ? "#a3ebcd" : "#f9d597"; ctx.fillRect(x + 42, y - 23, 10, 5);
+    ctx.restore();
+  }
+
   function drawAnchor(anchor, target) {
-    const x = anchor.x - cameraX;
+    const x = anchor.x - viewX;
     if (x < -70 || x > W + 70) return;
     const selected = target && target.anchor === anchor;
     const latched = tetherAnchor === anchor;
     const fragile = anchor.type === "fragile";
     const winch = anchor.type === "winch";
     const accent = fragile ? "#ff8f77" : winch ? "#ffc36b" : "#55d6cf";
+    ctx.save(); ctx.strokeStyle = "rgba(102,153,159,.22)"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x, 88); ctx.lineTo(x, anchor.y - 14); ctx.stroke();
+    ctx.fillStyle = "#345258"; ctx.fillRect(x - 4, anchor.y - 24, 8, 9); ctx.restore();
     ctx.save();
     ctx.translate(x, anchor.y);
     ctx.strokeStyle = anchor.visited ? "rgba(143,169,161,.22)" : selected || latched ? accent : fragile ? "rgba(255,143,119,.65)" : winch ? "rgba(255,195,107,.68)" : "rgba(125,173,169,.45)";
@@ -925,6 +1234,13 @@
       ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(-6, -7); ctx.lineTo(0, -2); ctx.lineTo(6, -7);
       ctx.moveTo(-6, 1); ctx.lineTo(0, 6); ctx.lineTo(6, 1); ctx.stroke();
+      ctx.save(); ctx.rotate(latched ? -visualTime * 4 : -visualTime * 0.3);
+      for (let i = 0; i < 8; i++) {
+        const angle = i * Math.PI / 4;
+        ctx.beginPath(); ctx.moveTo(Math.cos(angle) * 22, Math.sin(angle) * 17);
+        ctx.lineTo(Math.cos(angle) * 26, Math.sin(angle) * 21); ctx.stroke();
+      }
+      ctx.restore();
     }
     if (latched) {
       ctx.strokeStyle = "rgba(255,195,107,.92)";
@@ -939,6 +1255,10 @@
       }
     }
     if (selected && !tetherAnchor) {
+      ctx.save(); ctx.setLineDash([]); ctx.strokeStyle = "rgba(85,214,207,.32)";
+      const radius = 29 + Math.sin(visualTime * 3) * 2;
+      ctx.beginPath(); ctx.arc(0, 0, radius, visualTime * 0.6, visualTime * 0.6 + 1.4); ctx.stroke(); ctx.beginPath();
+      ctx.arc(0, 0, radius, visualTime * 0.6 + Math.PI, visualTime * 0.6 + Math.PI + 1.4); ctx.stroke(); ctx.restore();
       ctx.setLineDash([4, 5]);
       ctx.strokeStyle = "rgba(85,214,207,.18)";
       ctx.lineWidth = 1;
@@ -962,7 +1282,7 @@
 
   function drawSeal(seal, time) {
     if (seal.collected) return;
-    const x = seal.x - cameraX;
+    const x = seal.x - viewX;
     if (x < -50 || x > W + 50) return;
     const y = seal.y + Math.sin(time * 2.4 + seal.x) * 5;
     ctx.save(); ctx.translate(x, y); ctx.rotate(Math.sin(time + seal.x) * 0.04);
@@ -978,7 +1298,7 @@
 
   function drawSealLocator() {
     if (state !== "playing" && state !== "paused") return;
-    const locator = getSealLocator();
+    const locator = getSealLocator(viewX);
     if (!locator) return;
     const x = locator.side === "right" ? W - 22 : 22;
     const direction = locator.side === "right" ? 1 : -1;
@@ -995,7 +1315,7 @@
 
   function drawHazard(hazard, time) {
     const pos = hazardPosition(hazard);
-    const x = pos.x - cameraX;
+    const x = pos.x - viewX;
     if (x < -80 || x > W + 80) return;
     ctx.save(); ctx.translate(x, pos.y);
     ctx.strokeStyle = "rgba(255,107,107,.35)"; ctx.setLineDash([4, 5]);
@@ -1014,36 +1334,47 @@
     ctx.restore();
   }
 
-  function drawPlayer(time) {
-    const screenX = player.x - cameraX;
-    const screenY = player.y;
+  function drawPlayer() {
     ctx.save();
-    if (invulnerable > 0 && Math.floor(elapsed * 12) % 2 === 0) ctx.globalAlpha = 0.35;
-    const facing = player.vx < -20 ? -1 : 1;
-    if (state === "playing" && boostTime > 0) {
-      const intensity = Math.min(1, boostTime / SLING.seconds);
-      ctx.strokeStyle = `rgba(255,195,107,${0.58 * intensity})`;
-      ctx.lineWidth = 2;
+    if (invulnerable > 0) ctx.globalAlpha = 0.68 + Math.sin(visualTime * 24) * 0.18;
+    if (state === "menu") courier.draw(ctx, 955, 436, 2.3);
+    else courier.draw(ctx, rendered.x - viewX, rendered.y);
+    ctx.restore();
+  }
+
+  function drawRope(target) {
+    const hand = courier.attachment(rendered.x, rendered.y);
+    const end = tetherAnchor || target?.anchor;
+    if (!end) return;
+    ctx.save();
+    const hx = hand.x - viewX, hy = hand.y;
+    const ex = end.x - viewX, ey = end.y;
+    if (tetherAnchor) {
+      const distance = Math.hypot(end.x - rendered.x, end.y - rendered.y);
+      const slack = Math.max(0, ropeLength - distance);
+      const sag = Math.min(52, slack * 0.44);
+      const sway = Math.sin(visualTime * 12) * Math.min(4, slack * 0.08);
       ctx.lineCap = "round";
-      for (let i = -1; i <= 1; i += 1) {
-        const y = screenY + i * 7;
-        ctx.beginPath();
-        ctx.moveTo(screenX - facing * 22, y);
-        ctx.lineTo(screenX - facing * (22 + 34 * intensity), y);
-        ctx.stroke();
+      ctx.strokeStyle = "rgba(3,15,22,.7)"; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(hx, hy);
+      ctx.quadraticCurveTo((hx + ex) / 2 + sway, (hy + ey) / 2 + sag, ex, ey); ctx.stroke();
+      ctx.strokeStyle = end.type === "fragile" && FRAGILE_HOLD_SECONDS - tetherTime < 0.35
+        ? "#ff9f83" : "#c2ddd0";
+      ctx.lineWidth = 1.65; ctx.stroke();
+      if (ropePulse > 0) {
+        const t = 1 - ropePulse;
+        const mx = (hx + ex) / 2 + sway, my = (hy + ey) / 2 + sag;
+        const x = (1-t)**2 * ex + 2*(1-t)*t*mx + t*t*hx;
+        const y = (1-t)**2 * ey + 2*(1-t)*t*my + t*t*hy;
+        ctx.globalAlpha = ropePulse; ctx.fillStyle = "#fff1bf";
+        ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI*2); ctx.fill();
       }
+    } else {
+      ctx.strokeStyle = tetherHeld ? "rgba(85,214,207,.38)" : "rgba(85,214,207,.16)";
+      ctx.lineWidth = tetherHeld ? 1.5 : 1; ctx.setLineDash([5, 7]);
+      ctx.lineDashOffset = -visualTime * 16;
+      ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(ex, ey); ctx.stroke();
     }
-    ctx.translate(screenX, screenY);
-    ctx.rotate(Math.max(-0.42, Math.min(0.42, player.vy / 850)));
-    ctx.scale(facing, 1);
-    ctx.strokeStyle = "#e4c98f"; ctx.lineWidth = 2.5; ctx.lineCap = "round";
-    ctx.beginPath(); ctx.moveTo(-7, -3); ctx.quadraticCurveTo(-19 - Math.sin(time * 9) * 4, -8, -29, -4); ctx.stroke();
-    ctx.fillStyle = "#bc8057"; ctx.beginPath(); ctx.roundRect(-14, -9, 11, 16, 3); ctx.fill();
-    ctx.fillStyle = "#e5e0cb"; ctx.beginPath(); ctx.ellipse(0, 2, 8, 12, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#f2d7a1"; ctx.beginPath(); ctx.arc(2, -12, 7, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#e07959"; ctx.beginPath(); ctx.arc(4, -13, 7, Math.PI, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = "#e5e0cb"; ctx.lineWidth = 2.5;
-    ctx.beginPath(); ctx.moveTo(-4, 9); ctx.lineTo(-8, 17); ctx.moveTo(3, 10); ctx.lineTo(8, 15); ctx.stroke();
     ctx.restore();
   }
 
@@ -1135,12 +1466,12 @@
     for (let i = 1; i < points.length; i += 1) {
       ctx.globalAlpha = 0.8 - (i / points.length) * 0.38;
       ctx.beginPath();
-      ctx.arc(points[i].x - cameraX, points[i].y, i === points.length - 1 ? 4 : 2.5, 0, Math.PI * 2);
+      ctx.arc(points[i].x - viewX, points[i].y, i === points.length - 1 ? 4 : 2.5, 0, Math.PI * 2);
       ctx.fill();
     }
     if (warning && points.length > 1) {
       const end = points[points.length - 1];
-      const x = end.x - cameraX;
+      const x = end.x - viewX;
       ctx.globalAlpha = 0.85; ctx.strokeStyle = color; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(x - 5, end.y - 5); ctx.lineTo(x + 5, end.y + 5);
       ctx.moveTo(x + 5, end.y - 5); ctx.lineTo(x - 5, end.y + 5); ctx.stroke();
@@ -1158,28 +1489,33 @@
       canvas.width = pixelWidth; canvas.height = pixelHeight;
     }
     const scale = Math.min(pixelWidth / W, pixelHeight / H);
-    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = "#061923"; ctx.fillRect(0, 0, pixelWidth, pixelHeight);
+    const offset = effects.offset();
+    ctx.setTransform(scale, 0, 0, scale, (pixelWidth - W * scale) / 2, (pixelHeight - H * scale) / 2);
+    viewX = previous.camera + (cameraX - previous.camera) * renderAlpha;
+    rendered.x = previous.x + (player.x - previous.x) * renderAlpha;
+    rendered.y = previous.y + (player.y - previous.y) * renderAlpha;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip();
+    ctx.translate(offset.x, offset.y);
     drawBackground(time);
 
-    if (state !== "menu") {
+    if (socialVisible()) {
+      drawSocialWorld(time);
+    } else if (state !== "menu" && !(state === "map" && mapOrigin === "menu") && !(state === "history" && logOrigin === "menu")) {
       const target = nearestAnchor();
+      if (viewX < 350) drawSafeDock(150 - viewX, 460, true);
       checkpoints.forEach(drawCheckpoint);
       for (const hazard of hazards) {
-        const x = hazard.x - cameraX;
+        const x = hazard.x - viewX;
         if (x > -70 && x < W + 70) drawHazard(hazard, time);
       }
       for (const anchor of anchors) drawAnchor(anchor, target);
-      for (const seal of seals) drawSeal(seal, time);
-      if (tetherAnchor) {
-        ctx.strokeStyle = "rgba(198,229,212,.78)"; ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.moveTo(player.x - cameraX, player.y); ctx.lineTo(tetherAnchor.x - cameraX, tetherAnchor.y); ctx.stroke();
-      } else if (target) {
-        ctx.strokeStyle = tetherHeld ? "rgba(85,214,207,.38)" : "rgba(85,214,207,.16)";
-        ctx.lineWidth = tetherHeld ? 1.5 : 1; ctx.setLineDash([5, 7]);
-        ctx.beginPath(); ctx.moveTo(player.x - cameraX, player.y); ctx.lineTo(target.anchor.x - cameraX, target.anchor.y); ctx.stroke(); ctx.setLineDash([]);
-      }
+      for (const seal of seals) if (!targetPractice || seal.id === targetPractice.id) drawSeal(seal, time);
+      drawRope(target);
       if (player.x > 16700) {
-        const dockX = ROUTE_END - cameraX;
+        const dockX = ROUTE_END - viewX;
         ctx.fillStyle = "#263d3c"; ctx.fillRect(dockX, 440, 280, 195);
         ctx.fillStyle = "#56645a"; ctx.fillRect(dockX - 12, 436, 304, 8);
         ctx.fillStyle = "#d6bd8c"; ctx.fillRect(dockX + 208, 318, 9, 118);
@@ -1188,23 +1524,26 @@
         ctx.fillRect(dockX + 208, 305, 9, 11); ctx.shadowBlur = 0;
       }
       drawReleasePreview();
-      drawPlayer(time);
+      effects.draw(ctx, viewX);
+      drawPlayer();
       drawSealLocator();
       for (const hazard of hazards) {
         const pos = hazardPosition(hazard);
         const dx = pos.x - player.x;
         if (dx > 50 && dx < 390) {
           ctx.fillStyle = "rgba(255,107,107,.85)";
-          ctx.beginPath(); ctx.moveTo(W * 0.38 + dx - 8, 79); ctx.lineTo(W * 0.38 + dx + 8, 79); ctx.lineTo(W * 0.38 + dx, 92); ctx.closePath(); ctx.fill();
+          ctx.beginPath(); ctx.moveTo(pos.x - viewX - 8, 79); ctx.lineTo(pos.x - viewX + 8, 79); ctx.lineTo(pos.x - viewX, 92); ctx.closePath(); ctx.fill();
         }
       }
     } else {
       for (let i = 0; i < 4; i += 1) drawAnchor({ x: 480 + i * 255, y: [340, 285, 380, 300][i], visited: false }, null);
-      drawPlayer(0);
+      drawPlayer();
     }
+    effects.drawFlash(ctx, W, H);
+    ctx.restore();
   }
 
-  function playTone(frequency, duration, type, delay = 0) {
+  function playTone(frequency, duration, type, delay = 0, volume = 0.09) {
     if (!soundOn) return;
     try {
       audio ||= new AudioContext();
@@ -1214,7 +1553,7 @@
       oscillator.type = type;
       oscillator.frequency.setValueAtTime(frequency, audio.currentTime + delay);
       gain.gain.setValueAtTime(0.0001, audio.currentTime + delay);
-      gain.gain.exponentialRampToValueAtTime(0.09, audio.currentTime + delay + 0.012);
+      gain.gain.exponentialRampToValueAtTime(volume, audio.currentTime + delay + 0.012);
       gain.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + delay + duration);
       oscillator.connect(gain); gain.connect(audio.destination);
       oscillator.start(audio.currentTime + delay); oscillator.stop(audio.currentTime + delay + duration + 0.02);
@@ -1225,23 +1564,31 @@
   function resetFrameClock() {
     lastFrame = 0;
     frameAccumulator = 0;
+    syncVisualPosition();
   }
 
   function frame(timestamp) {
     if (!lastFrame) lastFrame = timestamp;
     const dt = Math.min(0.035, Math.max(0, (timestamp - lastFrame) / 1000));
     lastFrame = timestamp;
-    if (state === "playing" && !recoveryReady) {
+    if (state !== "paused" && state !== "map" && state !== "history") visualTime += dt;
+    if (state === "exploring" || state === "playing" && !recoveryReady) {
       frameAccumulator += dt;
-      while (frameAccumulator >= PHYSICS_DT - 1e-9 && state === "playing" && !recoveryReady) {
-        update(PHYSICS_DT);
+      while (frameAccumulator >= PHYSICS_DT - 1e-9 && (state === "exploring" || state === "playing" && !recoveryReady)) {
+        if (state === "exploring") updateSocial(PHYSICS_DT);
+        else update(PHYSICS_DT);
         frameAccumulator = Math.max(0, frameAccumulator - PHYSICS_DT);
       }
-      if (state !== "playing" || recoveryReady) frameAccumulator = 0;
+      if (state !== "exploring" && (state !== "playing" || recoveryReady)) frameAccumulator = 0;
     } else {
       frameAccumulator = 0;
     }
-    draw(timestamp / 1000);
+    renderAlpha = state === "exploring" || state === "playing" && !recoveryReady ? Math.min(1, frameAccumulator / PHYSICS_DT) : 1;
+    if (state !== "paused" && state !== "map" && state !== "history" && state !== "exploring" && (state !== "playing" || recoveryReady)) {
+      courier.update(dt, poseInput());
+      effects.update(dt, null, 0, false);
+    }
+    draw(visualTime);
     requestAnimationFrame(frame);
   }
 
@@ -1250,6 +1597,7 @@
     if (state !== "playing" || !recoveryReady) return;
     recoveryReady = false;
     invulnerable = 2.1;
+    courier.event("recover");
     resetFrameClock();
     updateHud(true);
   }
@@ -1257,12 +1605,33 @@
   window.addEventListener("keydown", event => {
     if (["Space", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.code)) event.preventDefault();
     if (event.repeat) return;
+    if (event.code === "KeyH") { toggleLog(); return; }
+    if (state === "history") { if (event.code === "Escape") toggleLog(); return; }
+    if (event.code === "KeyM") { toggleMap(); return; }
+    if (state === "map") { if (event.code === "Escape") toggleMap(); return; }
+    if (state === "exploring") {
+      if (event.code === "KeyF") { toggleFullscreen(); return; }
+      if (conversation) {
+        if (event.code === "Escape") closeConversation();
+        else if (/^Digit[1234]$/.test(event.code)) chooseConversation(Number(event.code.slice(-1)) - 1);
+        else if (event.code === "KeyE") chooseConversation(0);
+        else if (event.code === "KeyP") pauseGame();
+        return;
+      }
+      if (event.code === "KeyE") { openConversation(); return; }
+      if (event.code === "Escape" || event.code === "KeyP") { pauseGame(); return; }
+      keys.add(event.code); return;
+    }
+    if (state === "playing" && event.code === "KeyE") {
+      const dock = nearbyDock(); if (dock) enterHarbor(dock.id); return;
+    }
     if (state === "paused" && ["Space", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "KeyA", "KeyD", "KeyW", "KeyS"].includes(event.code)) return;
     if (recoveryReady && recoveryBlockedKeys.has(event.code)) return;
     if (["Space", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "KeyA", "KeyD", "KeyW", "KeyS"].includes(event.code)) startRecovery();
     keys.add(event.code);
     if (event.code === "Space") beginTether();
     if (event.code === "KeyG") togglePreview();
+    if (event.code === "KeyF") toggleFullscreen();
     if (event.code === "Escape" || event.code === "KeyP") {
       if (state === "playing") pauseGame(); else if (state === "paused") resumeGame();
     }
@@ -1271,19 +1640,20 @@
       takeHit("retry");
       ui.combo.textContent = "TEKRAR DENEME";
       messageUntil = elapsed + 0.9;
-    } else if (event.code === "KeyR" && (state === "won" || state === "lost")) resetRun();
+    } else if (event.code === "KeyR" && (state === "won" || state === "lost")) restartCurrentRun();
     if (state === "menu" && ["Digit1", "Digit2", "Digit3"].includes(event.code)) {
       resetRun(Number(event.code.slice(-1)) - 1);
     }
   });
   window.addEventListener("keyup", event => {
     recoveryBlockedKeys.delete(event.code);
+    if (savedFlight) savedFlight.blockedKeys = savedFlight.blockedKeys.filter(key => key !== event.code);
     keys.delete(event.code);
-    if (event.code === "Space" && tetherPointerId === null) releaseTether();
+    if (event.code === "Space" && tetherPointerId === null && state === "playing") releaseTether();
   });
   window.addEventListener("blur", () => {
     keys.clear(); steerPointer.clear(); tetherPointerY.clear();
-    releaseTether({ award: false, consumeAnchor: false });
+    tetherPointerId = null;
     pauseGame();
   });
   document.addEventListener("visibilitychange", () => {
@@ -1291,16 +1661,16 @@
       keys.clear();
       steerPointer.clear();
       tetherPointerY.clear();
-      releaseTether({ award: false, consumeAnchor: false });
+      tetherPointerId = null;
       pauseGame();
     }
     resetFrameClock();
   });
 
   function beginTetherPointer(event) {
-    if (state !== "playing" || event.button !== 0 || tetherHeld) return;
+    if (event.pointerType === "touch" || state !== "playing" || event.button !== 0 || tetherPointerId !== null) return;
     startRecovery();
-    beginTether();
+    if (!tetherHeld) beginTether();
     if (!tetherHeld) return;
     tetherPointerId = event.pointerId;
     if (event.pointerType === "touch") {
@@ -1318,7 +1688,7 @@
     if (tetherPointerId !== event.pointerId) return;
     tetherPointerId = null;
     tetherPointerY.clear();
-    releaseTether();
+    if (state === "playing") releaseTether();
   }
 
   canvas.addEventListener("pointerdown", beginTetherPointer);
@@ -1353,21 +1723,63 @@
   for (const button of document.querySelectorAll("[data-practice-start]")) {
     button.addEventListener("click", () => resetRun(Number(button.dataset.practiceStart)));
   }
+  for (const button of document.querySelectorAll("[data-seal-practice]")) {
+    button.addEventListener("click", () => startSealPractice(Number(button.dataset.sealPractice)));
+  }
   ui.tutorialSkip.addEventListener("click", completeTutorial);
+  document.querySelector("#explore-button").addEventListener("click", () => enterHarbor("rihtim"));
+  document.querySelector("#after-delivery-button").addEventListener("click", () => enterHarbor(state === "won" ? "fener" : "rihtim"));
+  socialUI.leave.addEventListener("click", leaveHarbor);
+  document.querySelector("#harbor-map-button").addEventListener("click", toggleMap);
+  document.querySelector("#map-close").addEventListener("click", toggleMap);
+  document.querySelector("#log-toggle").addEventListener("click", toggleLog);
+  document.querySelector("#log-close").addEventListener("click", toggleLog);
+  document.querySelector("#dialogue-close").addEventListener("click", closeConversation);
+  socialUI.invite.addEventListener("click", () => { const dock = nearbyDock(); if (dock) enterHarbor(dock.id); });
+  for (const button of document.querySelectorAll("[data-dock]")) button.addEventListener("click", () => travelToDock(button.dataset.dock));
   document.querySelector("#resume-button").addEventListener("click", resumeGame);
-  document.querySelector("#restart-button").addEventListener("click", () => resetRun());
-  document.querySelector("#replay-button").addEventListener("click", () => resetRun());
+  document.querySelector("#restart-button").addEventListener("click", restartCurrentRun);
+  document.querySelector("#replay-button").addEventListener("click", restartCurrentRun);
+  document.querySelector("#normal-shift-button").addEventListener("click", () => resetRun(-1));
   document.querySelector("#menu-button").addEventListener("click", () => { state = "menu"; setPanels(); });
   document.querySelector("#result-menu-button").addEventListener("click", () => { state = "menu"; setPanels(); });
   ui.pauseButton.addEventListener("click", event => { event.stopPropagation(); pauseGame(); });
   ui.previewButton.addEventListener("click", togglePreview);
-  ui.sound.addEventListener("click", () => {
-    soundOn = !soundOn;
+  function setSoundPreference() {
     ui.sound.classList.toggle("is-muted", !soundOn);
     ui.sound.setAttribute("aria-label", soundOn ? "Sesi kapat" : "Sesi aç");
+    ui.sound.setAttribute("aria-pressed", String(soundOn));
     ui.sound.title = soundOn ? "Sesi kapat" : "Sesi aç";
+  }
+  ui.sound.addEventListener("click", () => {
+    soundOn = !soundOn; setSoundPreference(); savePreference("sapan-postasi-sound", soundOn ? "on" : "off");
     if (soundOn) playTone(560, 0.08, "sine");
   });
+  setSoundPreference();
+
+  async function toggleFullscreen() {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await document.querySelector(".game-frame").requestFullscreen();
+    } catch { /* Fullscreen may be unavailable in an embedded browser. */ }
+  }
+
+  const fullscreenButton = document.querySelector("#fullscreen-toggle");
+  fullscreenButton.addEventListener("click", toggleFullscreen);
+  document.addEventListener("fullscreenchange", () => {
+    const active = Boolean(document.fullscreenElement);
+    fullscreenButton.setAttribute("aria-pressed", String(active));
+    fullscreenButton.title = active ? "Tam ekrandan çık (F)" : "Tam ekran (F)";
+  });
+  const motionButton = document.querySelector("#motion-toggle");
+  function setMotionPreference() {
+    effects.reduced = motionReduced;
+    motionButton.setAttribute("aria-pressed", String(!motionReduced));
+    motionButton.title = motionReduced ? "Hareket efektlerini aç" : "Hareket efektlerini azalt";
+  }
+  motionButton.addEventListener("click", () => { motionReduced = !motionReduced; setMotionPreference(); savePreference("sapan-postasi-motion", motionReduced ? "reduced" : "full"); });
+  setMotionPreference();
+  courier.reset(poseInput());
 
   ui.bestStart.textContent = formatScore(best);
   ui.bestTimeStart.textContent = formatRunTime(bestTime);

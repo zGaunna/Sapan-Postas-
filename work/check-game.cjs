@@ -31,6 +31,12 @@ const source = original.replace("update(PHYSICS_DT);", "if (globalThis.__beforeF
     elapsed: () => elapsed, invulnerable: () => invulnerable,
     getSealStatus, getSealLocator, drawSealLocator,
     setCamera: x => { cameraX = x; },
+    draw, courier, effects, previous, rendered,
+    renderAlpha: () => renderAlpha, visualTime: () => visualTime,
+    enterHarbor, leaveHarbor, updateSocial, openConversation, chooseConversation, closeConversation, toggleMap, travelToDock,
+    socialDock: () => socialDock, conversation: () => conversation,
+    startSealPractice, restartCurrentRun, targetPractice: () => targetPractice,
+    toggleLog,
   };
 })();`);
 assert.notEqual(source, original, "Test instrumentation must be inserted into the game closure");
@@ -55,10 +61,14 @@ function element(id) {
 const canvas = element("#game");
 const drawCalls = [];
 canvas.getContext = () => new Proxy({}, {
-  get(target, key) { return target[key] ?? ((...args) => drawCalls.push({ key, args })); },
+  get(target, key) {
+    if (key === "createLinearGradient" || key === "createRadialGradient") return () => ({ addColorStop() {} });
+    return target[key] ?? ((...args) => drawCalls.push({ key, args }));
+  },
   set(target, key, value) { target[key] = value; return true; },
 });
 canvas.getBoundingClientRect = () => ({ width: 1280, height: 720 });
+element("#map-chart").getContext = canvas.getContext;
 element("#lives").children = [element("life1"), element("life2"), element("life3")];
 const practiceButtons = [0, 1, 2].map(index => {
   const button = element(`practice-${index}`);
@@ -74,6 +84,7 @@ function dispatchKeyUp(code) {
 }
 const storage = new Map([["sapan-postasi-best", "123"], ["sapan-postasi-tutorial", "done"]]);
 const context = {
+  __playtestRun: true,
   document: {
     querySelector: selector => element(selector),
     querySelectorAll: selector => selector === "[data-practice-start]" ? practiceButtons : [],
@@ -92,7 +103,11 @@ const context = {
   },
   requestAnimationFrame() {},
 };
-vm.runInNewContext(source, context, { filename: gamePath });
+vm.createContext(context);
+for (const name of ["courier.js", "motion.js", "harbor-world.js", "harbor-social.js", "voyage-log.js"]) {
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "..", name), "utf8"), context, { filename: name });
+}
+vm.runInContext(source, context, { filename: gamePath });
 const game = context.__gameDebug;
 
 assert.equal(game.anchors.length, 27);
@@ -401,4 +416,4 @@ assert.equal(game.recoveryReady(), false, "Final life must end run rather than w
 assert.equal(element("#final-hits").textContent, "3");
 console.log("Recovery checks passed: all starts, held-input edges, 10-second freeze, pause, pointer, immunity boundaries, final life.");
 
-module.exports = { game, context, element, dispatchKey, dispatchKeyUp };
+module.exports = { game, context, element, dispatchKey, dispatchKeyUp, drawCalls };

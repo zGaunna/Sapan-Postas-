@@ -6,11 +6,25 @@ Gece limanında paket yetiştiren kuryeyi halkadan halkaya savur. Üç mührü t
 
 Windows'ta `BASLAT.cmd` dosyasına çift tıkla. Oyun varsayılan tarayıcıda açılır. İstersen `index.html` dosyasını doğrudan da açabilirsin.
 
-Oyun internetsiz çalışır; kurulum, eklenti veya API anahtarı istemez. En iyi skor bu tarayıcıda yerel olarak saklanır.
+Oyun PC için geliştirilmiştir. İnternetsiz çalışır; kurulum, eklenti veya API anahtarı istemez. En iyi skor bu tarayıcıda yerel olarak saklanır.
 
 ## PC'de antrenman
 
 Ana menüde **Antrenman** bölümünden **Başlangıç**, **Orta iskele** veya **Fener hattı** seç. Menü açıkken aynı noktaları **1**, **2** ve **3** tuşlarıyla da açabilirsin. Antrenmanda süre ve can sınırı yoktur; **R** son güvenli iskeleye döndürür. Skor rekor olarak kaydedilmez. Normal koşu için **Vardiyaya başla** düğmesini kullan.
+
+**1. / 2. / 3. Mühür** düğmeleri tek bir atışı çalıştırır. İlgili halkanın yakınında başlarsın; hazır olunca SPACE/fare veya yön tuşuna bas. Mührü alınca antrenman biter. Kaçırırsan **R** veya **Yeniden oyna** aynı başlangıca döndürür; sonraki iskeleler bu başlangıcı değiştirmez. Normal vardiya sonunda eksik mühürlerin antrenmanları da sonuç ekranında görünür.
+
+## Limanda dolaş
+
+Ana menüde **Limanda dolaş** düğmesini kullan. Eski Rıhtım, Vinç Avlusu, Dalgakıran ve Fener İskelesi'nde serbestçe yürüyebilirsin. **A / D** veya sol/sağ oklarla yürü; **Shift** ile hızlan. Birine ya da nesneye yaklaşınca **E** ile konuş veya incele. **1 / 2 / 3** ile cevap seç, **ESC** ile konuşmayı bitir. Ekrandaki cevapları fareyle de seçebilirsin.
+
+Emine abla, Hasan abi, Okan abi, Nermin abla, Leyla abla, Sefa ve Yusuf abi limandaki gündelik işleri hakkında konuşur. İlan panosu, makara tezgâhı, iskele zili ve seyir defteri incelenebilir. Sohbetler dallanır; üç paketli normal teslimattan sonra bazı konuşmalar değişir. Tanıştığın kişiler bu tarayıcıda hatırlanır.
+
+**M** liman haritasını açar. Çizilmiş kıyı haritasında beş bölgeyi, dört iskeleyi, uğradığın yerleri ve konumunu görürsün. İskele düğmeleri arasında geçiş yapabilirsin. Vardiyada bir iskeleye yakınken **E** veya iskele düğmesiyle mola verebilirsin; haritadan da iskele seçebilirsin. **Vardiyaya dön** konumunu, hızını, halatını, kırılgan halka aşınmasını ve rota ilerlemeni geri yükler. İskelelerde vardiya süresi, canlar ve paketler değişmez. Sonuç ekranındaki **İskelede biraz otur** düğmesi de limana açılır.
+
+Üstteki rota çubuğu beş bölgeyi, güvenli iskeleleri, mühürleri ve özel halkaları gösterir. Altındaki yazı sıradaki hedefi belirtir; mühür antrenmanında seçilen mühür ayrıca işaretlenir. Antrenman sonucundaki **Vardiyaya başla** düğmesi normal oyuna döndürür.
+
+Rota boyunca Eski Rıhtım depoları, Balık Pazarı tekneleri ve tezgâhları, Vinç Avlusu'nun vinçleri ve konteynerleri, taşlı Dalgakıran ve Fener Burnu birbirinden farklı çizilir. Bölge sınırlarında renkler yumuşak geçiş yapar; deniz, uzaktaki yapılar ve yakın kıyı farklı hızlarda kayar.
 
 ## Kontroller
 
@@ -20,8 +34,13 @@ Antrenmanda bir halkaya bağlıyken noktalı çizgi, şimdi bırakırsan yaklaş
 - **SPACE** veya fareyi bırak: Halatı bırakıp ivmeyle fırlat.
 - Halata bağlıyken **↑ / W** ile kısalt, **↓ / S** ile uzat. İpi içeri toplamak gerili salınımda teğetsel hızı artırır; hız mevcut fizik sınırlarında tutulur.
 - **Sol / sağ ok** ya da **A / D**: Havada yön ver.
-- **ESC** veya **P**: Duraklat; dokunmatik ekranda oyun alanındaki duraklat düğmesini kullan.
-- Dokunmatik ekranda **TUTUN** düğmesini basılı tut; kancaya bağlıyken parmağını ilk bastığın noktanın üstünde tutarak ipi kısalt, altında tutarak uzat. Parmağını başlangıç noktasına döndürünce ayar durur; kaldırınca halat bırakılır. Sol/sağ düğmeleriyle yön ver.
+- **ESC** veya **P**: Duraklat.
+- **F** veya üstteki **⛶** düğmesi: Tam ekrana geç / tam ekrandan çık.
+- **M**: Liman haritasını aç / kapat.
+- **H** veya üstteki **Defter** düğmesi: Son 20 normal vardiyayı gör. Süre, posta, puan, temiz atış ve düşüşler saklanır; antrenman ve otomatik testler eklenmez.
+- Üstteki **≈** düğmesi: Kamera sarsıntısını ve ışık parlamalarını kapatıp hareket izlerini azalt. Sistemindeki azaltılmış hareket tercihi başlangıçta dikkate alınır.
+
+Ses ve hareket efekti tercihleri bu tarayıcıda saklanır. Depolama engelliyse oyun ve sohbetler çalışmaya devam eder; kayıt defteri o oturumda tutulur. Harita, defter, duraklatma ve iskele ziyaretleri vardiya sayacını durdurur. Harita veya defter açıkken tuşu bırakmak asılı halatı koparmaz; dönüşte SPACE/fareyi yeniden basıp bırakarak bırakışını yapabilirsin.
 
 İlk koşuda halkaya tutunmayı, ipi yönetmeyi, temiz atışı ve havada yön vermeyi gösteren kısa bir öğretici açılır; bu sırada vardiya sayacı durur. Yön vererek tamamlayabilir veya **ATLA** ile kapatabilirsin. Son ipucu güvenli bir anda kendiliğinden kaybolur; tamamlamadıysan sonraki koşuda yeniden gösterilir.
 
@@ -41,6 +60,14 @@ Orta iskele ve fener hattında geçiş süren gösterilir. Sonuç ekranında top
 
 Halat ve uçuş fiziği saniyede 120 sabit adımla çalışır; ekranın çizim hızı bu adımı değiştirmez. Antrenmandaki uçuş yolu da aynı adımı kullanır. Uzun takılmalarda ani sıçramayı önlemek için kare başına işlenen süre sınırlıdır; 28 FPS altında oyun zamanı yavaşlayabilir.
 
+## Karakter ve hareket
+
+Kurye artık başı, gövdesi, iki eklemli kolları, ayrı bacakları, botları, atkısı ve posta çantası olan bir modelle çizilir. Halkaya yaklaşırken elini uzatır; tutunduğunda eli halatın yönünü izler. İpi toplama, salınım, bırakış, hızlı uçuş, düşüş ve iskelede bekleme farklı pozlarla gösterilir. Atkı ve çanta hız ve ivmeye tepki verir; bu hareketler oynanış fiziğini etkilemez.
+
+İskelede adımlar alınan mesafeyi takip eder, yere basan ayak sabitlenir. Durma, yürüme ve hızlı yürüyüş birbirine yumuşak geçer. Sohbette kurye karşısındakine döner; liman sakinleri de kuryeye bakar. Konuşma kutusu onları kapatmamak için ekranın karşı tarafına geçer.
+
+Ekran, fizik adımları arasındaki konum ve kamera geçişlerini ara karelerle yumuşatır. Tutunma, temiz atış, kırılan halka, mühür, çarpışma ve güvenli iskele için ayrı efektler vardır. Duraklatma karakteri, atkıyı, efektleri ve arka planı birlikte dondurur. Büyük PC ekranlarında oyun alanı 1600 piksele kadar büyür; tam ekranda görüntü oranı korunur.
+
 ## Geliştirme ve doğrulama
 
 Projenin GitHub deposu: [zGaunna/Sapan-Postas-](https://github.com/zGaunna/Sapan-Postas-).
@@ -53,8 +80,25 @@ node work/check-game.cjs
 node work/playtest-route.cjs
 node work/check-frame-loop.cjs
 node work/check-delivery.cjs
+node work/check-courier.cjs
+node work/check-motion.cjs
+node work/check-world.cjs
+node work/check-social.cjs
+node work/check-harbor.cjs
+node work/check-target.cjs
+node work/check-target-practice.cjs
+node work/check-log.cjs
+node work/check-progression.cjs
 ```
 
 İlk test; antrenman modlarını, yeniden denemeyi, süreyi, özel halkaları, rekor ayrımını, bozuk/engellenmiş depolamayı, iskele sürelerini, güvenli kurtarmayı ve uçuş önizlemesinin gerçek oyun fiziğiyle eşleşmesini kontrol eder. Parkur testi, aynı girdilerle tekrarlanabilir bir kontrol stratejisinin vardiyayı bitirdiğini doğrular. Kare döngüsü testi, kaydedilen bütün parkur girdilerini 30/60/120/144/180 Hz çizim döngülerinde oynatıp konum, süre, iskele geçişleri ve düşüşlerin birebir eşleştiğini kontrol eder.
 
 Teslimat testi aynı tekrar kontrolünü 3/3 mühürlü gerçek koşuda yapar; makara atışında en az 0,25 saniyelik farklı bırakışları, birkaç ip uzunluğunu ve üç hedef atışında 0–4 fizik adımı gecikmenin 125 birleşimini doğrular. Ayrıca mühür bildirimi/kurtarma kurallarını ve iki süre kaydının ayrılığını kontrol eder. İnsan oyuncunun zorluğu bu otomatik testlerle ölçülmez.
+
+Karakter testi eklem/halat hizasını, pozları, çizimin durumu değiştirmediğini, uç hızlarda sonlu değerleri ve atkı sınırlarını denetler. Hareket testi ara kareleri, duraklatmayı, kurtarmada kamera sıfırlamasını, efekt sınırlarını ve azaltılmış hareket kontrolünü denetler.
+
+Gerçek tarayıcı kontrolü için yerel HTTP sunucusu ve geliştirme ortamında Playwright/Chromium gerekir. `node work/prepare-browser-playtest.cjs` ardından `node work/browser-motion-check.cjs` çalıştır. Playwright ayrı bir klasördeyse paket klasörünü ikinci argüman olarak ver. Test oyuncunun kayıtlarını değiştirmeden klavye/fare, duraklatma, geniş ekranda tam ekran ve üç mühürlü tam parkuru denetler; ekran görüntülerini `work/evidence/` içine yazar. Oyunun kendisi Playwright gerektirmez.
+
+`node work/browser-harbor-check.cjs` gerçek yürüyüşü, sohbet dallarını, haritayı, dört iskeleyi ve rota dönüşünü kontrol eder. `node work/browser-progression-check.cjs` hedef antrenman düğmelerini, normal/antrenman kayıt ayrımını, tercihlerin yeniden yüklenmesini, 1024×600 PC penceresini ve internet kapalıyken `file://` açılışını kontrol eder. Aynı Playwright paket argümanını bu komutlara da verebilirsin.
+
+`node work/browser-performance-check.cjs` beş bölgede çizimi gerçek tarayıcı kareleri arasında örnekler; çizim çağrısının CPU süresini ve kare aralıklarını raporlar. Bu rapor tek başına 180 FPS veya her bilgisayarda aynı performans iddiası değildir. Dünya testi çizimlerin oyun verisini ve Canvas durumunu bozmadığını; iskele testi asılı halatla ziyaret sonrası fiziksel uçuşun ziyaretsiz koşuyla aynı kaldığını da doğrular.

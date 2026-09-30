@@ -17,6 +17,9 @@
       </a>
       <div class="top-actions">
         <span class="edition">GECE VARDİYASI <i></i></span>
+        <button id="log-toggle" class="log-toggle" type="button" title="Vardiya defteri (H)">Defter</button>
+        <button id="motion-toggle" class="icon-button" type="button" aria-label="Hareket efektleri" aria-pressed="true" title="Hareket efektlerini azalt">≈</button>
+        <button id="fullscreen-toggle" class="icon-button" type="button" aria-label="Tam ekran" aria-pressed="false" title="Tam ekran (F)">⛶</button>
         <button id="sound-toggle" class="icon-button" type="button" aria-label="Sesi aç" title="Sesi aç">♪</button>
       </div>
     </header>
@@ -30,7 +33,7 @@
           <div class="hud-stat"><small>POSTA</small><div class="seal-readout"><strong id="seals">0 <span>/ 3</span></strong><ol id="seal-marks" class="seal-marks" aria-label="Mühür durumu"></ol></div></div>
           <div id="rope-readout" class="hud-stat rope-readout" hidden aria-live="polite"><small>HALAT</small><strong><b id="rope-length">0</b><span> px</span></strong><div class="rope-meter" aria-hidden="true"><i id="rope-fill"></i></div></div>
         </div>
-        <div class="hud-center"><span class="route-label">FENER İSKELESİ</span><div class="route-track"><span id="route-fill"></span><i id="route-marker"></i></div><small id="route-clock" class="route-clock">1:55 KALAN</small><small id="run-time" class="run-time">GEÇEN 0:00.00</small></div>
+        <div class="hud-center"><span class="route-label">FENER İSKELESİ</span><div id="route-map" class="route-track" role="img" aria-label="Liman rotası"><div id="map-segments" class="map-segments"></div><span id="route-fill"></span><div id="map-landmarks" class="map-landmarks"></div><i id="route-marker"></i></div><small id="map-next" class="map-next">İleride · 1. mühür</small><small id="route-clock" class="route-clock">1:55 KALAN</small><small id="run-time" class="run-time">GEÇEN 0:00.00</small></div>
         <div class="hud-right"><button id="preview-toggle" class="preview-toggle" type="button" aria-label="Uçuş önizlemesi" aria-pressed="true" title="Uçuş yolunu gizle (G)" hidden>YOL <kbd>G</kbd></button><div id="lives" class="lives" aria-label="3 can"><i></i><i></i><i></i></div><button id="pause-button" class="pause-button" type="button" aria-label="Oyunu duraklat">Ⅱ</button></div>
         <div id="release-cue" class="release-cue" hidden>ŞİMDİ BIRAK · TEMİZ FIRLATMA</div>
         <div id="tutorial-cue" class="tutorial-cue" hidden>
@@ -40,6 +43,38 @@
         </div>
         <div id="hint" class="hint">Halkaya yaklaşınca <kbd>SPACE</kbd> basılı tut</div>
         <div id="combo" class="combo" aria-live="polite"></div>
+        <div id="district-name" class="district-name"></div>
+        <button id="dock-invite" class="dock-invite" hidden type="button">İskeleye uğra <kbd>E</kbd></button>
+      </section>
+
+      <section id="voyage-log" class="overlay overlay-dim" hidden aria-labelledby="log-title">
+        <div class="map-card log-card"><div class="map-heading"><div><small>SON 20 VARDİYA</small><h2 id="log-title">Vardiya defteri</h2><p>Normal vardiyalarının süreleri, paketleri ve atışları burada durur.</p></div><button id="log-close" type="button">Kapat <kbd>H</kbd></button></div>
+          <p id="log-empty" class="log-empty">Henüz bir vardiya bitirmedin. İlk dönüşünde deftere yazarız.</p>
+          <div class="log-scroll"><table id="log-table" hidden><thead><tr><th>Zaman</th><th>Sonuç</th><th>Posta</th><th>Süre</th><th>Puan</th><th>Temiz atış</th><th>Düşüş</th></tr></thead><tbody id="log-rows"></tbody></table></div>
+          <p class="map-note">Bu tarayıcıda saklanır. Antrenmanlar deftere eklenmez.</p>
+        </div>
+      </section>
+
+      <section id="social-hud" class="social-hud" hidden aria-label="İskelede keşif">
+        <div><small>GÜVENLİ İSKELE</small><strong id="social-place">Eski Rıhtım</strong><span id="social-contacts">0 / 7 kişiyle tanıştın</span></div>
+        <nav><button id="harbor-map-button" type="button">Liman haritası <kbd>M</kbd></button><button id="harbor-leave-button" type="button">Ana menü</button></nav>
+        <p id="social-hint">A / D: yürü · E: konuş / incele · Shift: hızlı yürü</p>
+      </section>
+      <section id="dialogue" class="conversation" hidden role="dialog" aria-labelledby="dialogue-name">
+        <div class="conversation-heading"><div><strong id="dialogue-name"></strong><small id="dialogue-role"></small></div><button id="dialogue-close" type="button" aria-label="Konuşmayı bitir">Kapat <kbd>ESC</kbd></button></div>
+        <p id="dialogue-text" aria-live="polite"></p>
+        <div id="dialogue-choices"></div>
+      </section>
+      <section id="harbor-map" class="overlay overlay-dim harbor-map" hidden aria-labelledby="map-title">
+        <div class="map-card"><div class="map-heading"><div><small>KIYI HATTI</small><h2 id="map-title">Liman haritası</h2><p id="map-copy">Bir iskele seçip yürüyerek etrafına bak.</p></div><button id="map-close" type="button">Kapat <kbd>M</kbd></button></div>
+          <canvas id="map-chart" class="map-chart" width="1280" height="720" aria-label="Beş bölge, dört güvenli iskele ve bulunduğun nokta"></canvas>
+          <div class="map-docks">
+            <button type="button" data-dock="rihtim"><b>01</b><strong>Eski Rıhtım</strong><span>Emine abla · Hasan abi</span></button>
+            <button type="button" data-dock="vinc"><b>02</b><strong>Vinç Avlusu</strong><span>Okan abi · Nermin abla</span></button>
+            <button type="button" data-dock="dalgakiran"><b>03</b><strong>Dalgakıran</strong><span>Leyla abla · Sefa</span></button>
+            <button type="button" data-dock="fener"><b>04</b><strong>Fener İskelesi</strong><span>Yusuf abi</span></button>
+          </div><p class="map-note">İskelelerde süre işlemez. Etrafına bak, iki laf et; hazır olunca yola dön.</p>
+        </div>
       </section>
 
       <div id="touch-controls" class="touch-controls" hidden aria-label="Dokunmatik kontroller">
@@ -68,9 +103,15 @@
               <button type="button" data-practice-start="1"><kbd>2</kbd> Orta iskele</button>
               <button type="button" data-practice-start="2"><kbd>3</kbd> Fener hattı</button>
             </div>
+            <div class="practice-options seal-practice-options" aria-label="Mühür atışlarını çalış">
+              <button type="button" data-seal-practice="1">1. Mühür</button>
+              <button type="button" data-seal-practice="2">2. Mühür</button>
+              <button type="button" data-seal-practice="3">3. Mühür</button>
+            </div>
             <p>Süresiz · Sınırsız can · R: son iskeleye dön · G: uçuş yolu · Rekor kaydı yok</p>
           </section>
           <p class="footnote">Normal vardiya yaklaşık 2 dakika sürer · Rekorun bu tarayıcıda saklanır</p>
+          <button id="explore-button" class="explore-button" type="button">Limanda dolaş <span>Yürü, sohbet et, etrafına bak ↗</span></button>
         </div>
         <div class="side-note"><span>DALGAKIRAN</span><b>05</b><span>SON TEKNE ÇIKTI</span></div>
       </section>
@@ -94,13 +135,19 @@
           <div class="result-stats"><span>Teslimat süresi</span><b id="delivery-time-result">—</b></div>
           <p id="new-delivery-best" class="time-record" hidden>YENİ TESLİMAT REKORU</p>
           <ol id="result-splits" class="result-splits" hidden aria-label="İskele geçiş süreleri"></ol>
-          <div class="dialog-actions"><button id="replay-button" class="primary-button" type="button">Yeniden oyna <span>↗</span></button><button id="result-menu-button" class="text-button" type="button">Ana menü</button></div>
+          <section id="result-practice" class="result-practice" hidden><p>Eksik mührün atışını çalış:</p><div class="practice-options"><button type="button" data-seal-practice="1">1. Mühür</button><button type="button" data-seal-practice="2">2. Mühür</button><button type="button" data-seal-practice="3">3. Mühür</button></div></section>
+          <div class="dialog-actions"><button id="replay-button" class="primary-button" type="button">Yeniden oyna <span>↗</span></button><button id="normal-shift-button" class="secondary-button" type="button" hidden>Vardiyaya başla</button><button id="after-delivery-button" class="secondary-button" type="button">İskelede biraz otur</button><button id="result-menu-button" class="text-button" type="button">Ana menü</button></div>
         </div>
       </section>
     </section>
 
     <footer class="bottomline"><span>ÇEVRİMDIŞI GECE MACERASI</span><span>YEREL KAYIT <i></i></span></footer>
   </main>
+  <script src="courier.js"></script>
+  <script src="motion.js"></script>
+  <script src="harbor-world.js"></script>
+  <script src="harbor-social.js"></script>
+  <script src="voyage-log.js"></script>
   <script src="game.js"></script>
 </body>
 </html>
