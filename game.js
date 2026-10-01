@@ -83,7 +83,45 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     a: 0.22 + ((i * 11) % 50) / 100
   }));
 
-  let state = "menu";
+  const states = {
+    menu: Object.freeze({
+      id: "menu",
+      enter(context) { if (context.kind === "menu" || context.kind === "startup") setPanels(); },
+      update: updateIdleVisuals,
+      draw: drawMenuWorld,
+      exit() {}
+    }),
+    playing: pendingState("playing"),
+    exploring: pendingState("exploring"),
+    paused: pendingState("paused"),
+    map: pendingState("map"),
+    history: pendingState("history"),
+    won: pendingState("won"),
+    lost: pendingState("lost")
+  };
+  const machine = createStateMachine(states, states.menu);
+
+  function pendingState(id) {
+    return Object.freeze({ id, enter() {}, update: updateIdleVisuals, draw: drawLegacyWorld, exit() {} });
+  }
+
+  function createStateMachine(definitions, initial) {
+    let current = initial;
+    return Object.freeze({
+      get current() { return current; },
+      is: target => current === target,
+      in: targets => targets.includes(current),
+      transition(next, context = {}) {
+        if (!Object.values(definitions).includes(next)) throw new Error("Unknown game state");
+        current.exit(context);
+        current = next;
+        current.enter(context);
+      },
+      start() { current.enter({ kind: "startup" }); },
+      update(dt, phase) { current.update(dt, phase); },
+      draw(time) { current.draw(time); }
+    });
+  }
   let cameraX = 0;
   let elapsed = 0;
   let runTime = 0;
@@ -133,10 +171,10 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   let motionReduced = readPreference("sapan-postasi-motion") === "reduced" || readPreference("sapan-postasi-motion") !== "full" && Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
   let socialDock = null;
   let savedFlight = null;
-  let socialOrigin = "menu";
-  let pauseOrigin = "playing";
-  let mapOrigin = "exploring";
-  let logOrigin = "menu";
+  let socialOrigin = states.menu;
+  let pauseOrigin = states.playing;
+  let mapOrigin = states.exploring;
+  let logOrigin = states.menu;
   let conversation = null;
   let delivered = false;
   let stepSoundClock = 0;
@@ -152,7 +190,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   };
 
   function socialVisible() {
-    return Boolean(socialDock && (state === "exploring" || state === "paused" && pauseOrigin === "exploring" || state === "map" && mapOrigin === "exploring" || state === "history" && logOrigin === "exploring"));
+    return Boolean(socialDock && (machine.is(states.exploring) || machine.is(states.paused) && pauseOrigin === states.exploring || machine.is(states.map) && mapOrigin === states.exploring || machine.is(states.history) && logOrigin === states.exploring));
   }
 
   function readPreference(key) { try { return localStorage.getItem(key); } catch { return null; } }
@@ -167,7 +205,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
       attached: Boolean(tetherAnchor), anchorDX: target ? target.x - player.x : 0,
       anchorDY: target ? target.y - player.y : -1, taut: Boolean(tetherAnchor && distance >= ropeLength - 3),
       boost: socialVisible() ? 0 : Math.min(1, boostTime / SLING.seconds), waiting: socialVisible() ? Math.abs(player.vx) < 1 : recoveryReady,
-      menu: state === "menu" || state === "won" || state === "lost" };
+      menu: machine.is(states.menu) || machine.is(states.won) || machine.is(states.lost) };
   }
 
   function syncVisualPosition() {
@@ -240,7 +278,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   }
 
   function updateTutorialPrompt() {
-    const visible = state === "playing" && tutorialActive;
+    const visible = machine.is(states.playing) && tutorialActive;
     ui.hud.classList.toggle("tutorial-active", visible);
     ui.tutorial.hidden = !visible;
     if (!visible) return;
@@ -264,13 +302,13 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     tutorialActive = false;
     try { localStorage.setItem("sapan-postasi-tutorial", "done"); } catch { /* Tutorial preference is optional. */ }
     updateTutorialPrompt();
-    if (state === "playing") updateHud(true);
+    if (machine.is(states.playing)) updateHud(true);
   }
 
   function dismissTutorialForRun() {
     tutorialActive = false;
     updateTutorialPrompt();
-    if (state === "playing") updateHud(true);
+    if (machine.is(states.playing)) updateHud(true);
   }
 
   function advanceTutorial(dt) {
@@ -297,18 +335,18 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   }
 
   function setPanels() {
-    ui.hud.hidden = state !== "playing";
-    ui.start.hidden = state !== "menu";
-    ui.pause.hidden = state !== "paused";
-    ui.result.hidden = state !== "won" && state !== "lost";
+    ui.hud.hidden = !machine.is(states.playing);
+    ui.start.hidden = !machine.is(states.menu);
+    ui.pause.hidden = !machine.is(states.paused);
+    ui.result.hidden = !machine.is(states.won) && !machine.is(states.lost);
     ui.touch.hidden = true;
-    ui.previewButton.hidden = state !== "playing" || practiceIndex < 0;
-    socialUI.hud.hidden = !socialVisible() || state !== "exploring";
-    socialUI.dialogue.hidden = !conversation || state !== "exploring";
-    socialUI.map.hidden = state !== "map";
-    document.querySelector("#voyage-log").hidden = state !== "history";
-    socialUI.invite.hidden = state !== "playing" || !nearbyDock();
-    document.querySelector("#restart-button").textContent = state === "paused" && pauseOrigin === "exploring" ? "İskele girişine dön" : "Baştan başla";
+    ui.previewButton.hidden = !machine.is(states.playing) || practiceIndex < 0;
+    socialUI.hud.hidden = !socialVisible() || !machine.is(states.exploring);
+    socialUI.dialogue.hidden = !conversation || !machine.is(states.exploring);
+    socialUI.map.hidden = !machine.is(states.map);
+    document.querySelector("#voyage-log").hidden = !machine.is(states.history);
+    socialUI.invite.hidden = !machine.is(states.playing) || !nearbyDock();
+    document.querySelector("#restart-button").textContent = machine.is(states.paused) && pauseOrigin === states.exploring ? "İskele girişine dön" : "Baştan başla";
     updateReleaseCue();
     updateTutorialPrompt();
   }
@@ -341,7 +379,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     tetherTime = 0; fragileWarningPlayed = false;
     tutorialActive = practiceIndex < 0 && !hasCompletedTutorial(); tutorialStep = 0; tutorialTimer = 0;
     steerPointer.clear(); tetherPointerY.clear(); tetherPointerId = null; keys.clear();
-    state = "playing";
+    machine.transition(states.playing, { kind: "legacy" });
     effects.reset(); effects.reduced = motionReduced; ropePulse = 0;
     syncVisualPosition(); courier.reset(poseInput());
     resetFrameClock();
@@ -369,22 +407,22 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   }
 
   function restartCurrentRun() {
-    if (state === "paused" && pauseOrigin === "exploring" && socialDock) { enterHarbor(socialDock.id); return; }
+    if (machine.is(states.paused) && pauseOrigin === states.exploring && socialDock) { enterHarbor(socialDock.id); return; }
     if (targetPractice) startSealPractice(targetPractice.id);
     else resetRun();
   }
 
   function pauseGame() {
-    if (state !== "playing" && state !== "exploring") return;
-    pauseOrigin = state;
-    state = "paused";
+    if (!machine.is(states.playing) && !machine.is(states.exploring)) return;
+    pauseOrigin = machine.current;
+    machine.transition(states.paused, { kind: "legacy" });
     resetFrameClock();
     setPanels();
   }
 
   function resumeGame() {
-    if (state !== "paused") return;
-    state = pauseOrigin;
+    if (!machine.is(states.paused)) return;
+    machine.transition(pauseOrigin, { kind: "legacy" });
     resetFrameClock();
     setPanels();
   }
@@ -510,12 +548,12 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   }
 
   function finishRun(won, reason = null) {
-    if (state !== "playing") return;
+    if (!machine.is(states.playing)) return;
     const result = computeResult({ won, reason, practiceIndex, score, remaining, sealCount, runTime,
       runStats, splitTimes, seals, targetPractice, best, testRun: options.testRun });
     releaseTether({ award: false, consumeAnchor: false });
     boostTime = 0;
-    state = result.state;
+    machine.transition(result.won ? states.won : states.lost, { kind: "legacy" });
     delivered = result.delivered;
     score = result.score;
     splitTimes = result.splits;
@@ -527,25 +565,25 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   }
 
   function nearbyDock() {
-    if (state !== "playing") return null;
+    if (!machine.is(states.playing)) return null;
     return HarborWorld.docks.find(dock => Math.abs(player.x - dock.x) < 260 && player.y > 200 && player.y < 600) || null;
   }
 
   function enterHarbor(id = "rihtim") {
     const dock = HarborWorld.docks.find(item => item.id === id);
     if (!dock) return false;
-    if (state === "playing") {
+    if (machine.is(states.playing)) {
       savedFlight = { player: { ...player }, camera: cameraX, recoveryReady, invulnerable, boostTime,
         tether: { held: tetherHeld, anchor: tetherAnchor, length: ropeLength, rate: ropeLengthRate, time: tetherTime, warning: fragileWarningPlayed },
         blockedKeys: [...recoveryBlockedKeys] };
       releaseTether({ award: false, consumeAnchor: false });
-      socialOrigin = "playing";
+      socialOrigin = states.playing;
     } else if (!socialVisible()) {
-      socialOrigin = state === "won" || state === "lost" ? state : "menu";
+      socialOrigin = machine.is(states.won) || machine.is(states.lost) ? machine.current : states.menu;
       savedFlight = null;
     }
     socialDock = dock; visitedDocks.add(dock.id); conversation = null;
-    state = "exploring";
+    machine.transition(states.exploring, { kind: "legacy" });
     keys.clear(); recoveryBlockedKeys.clear();
     player.x = dock.id === "rihtim" ? 170 : dock.x - 120;
     player.y = dock.floor - 28; player.vx = 0; player.vy = 0;
@@ -557,15 +595,15 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   function leaveHarbor() {
     if (!socialDock) return;
     conversation = null; socialDock = null; keys.clear();
-    if (savedFlight && socialOrigin === "playing") {
+    if (savedFlight && socialOrigin === states.playing) {
       Object.assign(player, savedFlight.player); cameraX = savedFlight.camera;
       recoveryReady = savedFlight.recoveryReady; invulnerable = savedFlight.invulnerable; boostTime = savedFlight.boostTime;
       tetherHeld = savedFlight.tether.held; tetherAnchor = savedFlight.tether.anchor;
       ropeLength = savedFlight.tether.length; ropeLengthRate = savedFlight.tether.rate;
       tetherTime = savedFlight.tether.time; fragileWarningPlayed = savedFlight.tether.warning;
       recoveryBlockedKeys.clear(); for (const key of savedFlight.blockedKeys) recoveryBlockedKeys.add(key);
-      state = "playing";
-    } else state = socialOrigin;
+      machine.transition(states.playing, { kind: "legacy" });
+    } else machine.transition(socialOrigin, { kind: "legacy" });
     savedFlight = null;
     courier.reset(poseInput()); resetFrameClock(); setPanels(); updateHud(true);
   }
@@ -574,7 +612,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     if (!socialDock) return;
     socialUI.place.textContent = socialDock.name;
     socialUI.contacts.textContent = `${HarborSocial.contacts().length} / ${HarborSocial.people.length} kişiyle tanıştın`;
-    socialUI.leave.textContent = socialOrigin === "playing" ? "Vardiyaya dön" : socialOrigin === "menu" ? "Ana menü" : "Sonuçlara dön";
+    socialUI.leave.textContent = socialOrigin === states.playing ? "Vardiyaya dön" : socialOrigin === states.menu ? "Ana menü" : "Sonuçlara dön";
     const target = HarborSocial.nearest(socialDock.id, player.x);
     socialUI.hint.textContent = conversation ? "1 / 2 / 3: cevap ver · ESC: konuşmayı bitir" : target
       ? `E · ${target.name} ${target.look ? "ile konuş" : "incele"} · A / D: yürü`
@@ -582,7 +620,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   }
 
   function updateSocial(dt) {
-    if (state !== "exploring" || !socialDock) return;
+    if (!machine.is(states.exploring) || !socialDock) return;
     previous.x = player.x; previous.y = player.y; previous.camera = cameraX;
     const oldVX = player.vx;
     const speed = keys.has("ShiftLeft") || keys.has("ShiftRight") ? 260 : 170;
@@ -604,7 +642,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   }
 
   function openConversation(id = null) {
-    if (state !== "exploring" || !socialDock) return false;
+    if (!machine.is(states.exploring) || !socialDock) return false;
     const target = HarborSocial.nearest(socialDock.id, player.x);
     if (!target || id && target.id !== id) return false;
     const node = HarborSocial.getNode(target.id, "start", { delivered });
@@ -628,7 +666,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   }
 
   function chooseConversation(index) {
-    if (!conversation || state !== "exploring" || !Number.isInteger(index)) return;
+    if (!conversation || !machine.is(states.exploring) || !Number.isInteger(index)) return;
     const answer = conversation.choices[index];
     if (!answer) return;
     if (answer.next === null) closeConversation();
@@ -641,19 +679,19 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   function closeConversation() { conversation = null; keys.clear(); setPanels(); updateSocialHud(); }
 
   function toggleMap() {
-    if (state === "map") { state = mapOrigin; resetFrameClock(); setPanels(); return; }
-    if (!["playing", "exploring", "menu"].includes(state)) return;
-    mapOrigin = state; state = "map"; keys.clear(); resetFrameClock(); setPanels();
-    document.querySelector("#map-copy").textContent = mapOrigin === "playing"
+    if (machine.is(states.map)) { machine.transition(mapOrigin, { kind: "legacy" }); resetFrameClock(); setPanels(); return; }
+    if (!machine.in([states.playing, states.exploring, states.menu])) return;
+    mapOrigin = machine.current; machine.transition(states.map, { kind: "legacy" }); keys.clear(); resetFrameClock(); setPanels();
+    document.querySelector("#map-copy").textContent = mapOrigin === states.playing
       ? "Vardiya duraklatıldı. İskeleye uğrarsan aynı noktadan yola dönebilirsin."
       : "Bir iskele seçip yürüyerek etrafına bak.";
-    HarborWorld.drawMap(document.querySelector("#map-chart").getContext("2d"), mapOrigin === "menu" ? 150 : player.x, [...visitedDocks]);
+    HarborWorld.drawMap(document.querySelector("#map-chart").getContext("2d"), mapOrigin === states.menu ? 150 : player.x, [...visitedDocks]);
   }
 
   function toggleLog() {
-    if (state === "history") { state = logOrigin; resetFrameClock(); setPanels(); return; }
-    if (!["menu", "won", "lost", "playing", "exploring"].includes(state)) return;
-    logOrigin = state; state = "history"; keys.clear(); resetFrameClock(); setPanels();
+    if (machine.is(states.history)) { machine.transition(logOrigin, { kind: "legacy" }); resetFrameClock(); setPanels(); return; }
+    if (!machine.in([states.menu, states.won, states.lost, states.playing, states.exploring])) return;
+    logOrigin = machine.current; machine.transition(states.history, { kind: "legacy" }); keys.clear(); resetFrameClock(); setPanels();
     const runs = VoyageLog.list();
     document.querySelector("#log-empty").hidden = runs.length > 0;
     document.querySelector("#log-table").hidden = runs.length === 0;
@@ -666,7 +704,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
 
   function travelToDock(id) {
     if (!HarborWorld.docks.some(dock => dock.id === id)) return false;
-    if (state === "map") { state = mapOrigin; }
+    if (machine.is(states.map)) { machine.transition(mapOrigin, { kind: "legacy" }); }
     return enterHarbor(id);
   }
 
@@ -682,7 +720,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   }
 
   function beginTether() {
-    if (state !== "playing" || tetherHeld) return;
+    if (!machine.is(states.playing) || tetherHeld) return;
     tetherHeld = true;
     if (ui.tetherTouch) ui.tetherTouch.classList.add("is-held");
     tryAttach();
@@ -738,7 +776,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   }
 
   function updateReleaseCue() {
-    const shouldHide = state !== "playing" || !tetherHeld || !tetherAnchor || !isCleanRelease(tetherAnchor);
+    const shouldHide = !machine.is(states.playing) || !tetherHeld || !tetherAnchor || !isCleanRelease(tetherAnchor);
     ui.releaseCue.textContent = ui.touch.hidden
       ? "ŞİMDİ BIRAK · TEMİZ FIRLATMA"
       : "PARMAĞINI KALDIR · TEMİZ FIRLATMA";
@@ -746,7 +784,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   }
 
   function releaseTether({ award = true, consumeAnchor = true } = {}) {
-    if (state !== "playing") { award = false; consumeAnchor = false; }
+    if (!machine.is(states.playing)) { award = false; consumeAnchor = false; }
     if (!tetherHeld && !tetherAnchor) return;
     const teachSteering = tutorialActive && tutorialStep === 1 && award && Boolean(tetherAnchor);
     tetherHeld = false;
@@ -918,7 +956,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   }
 
   function takeHit(reason = "water") {
-    if (state !== "playing" || (recoveryReady && reason !== "retry") || (invulnerable > 0 && reason === "hazard")) return;
+    if (!machine.is(states.playing) || (recoveryReady && reason !== "retry") || (invulnerable > 0 && reason === "hazard")) return;
     if (reason !== "retry") motionEvent(reason === "water" ? "water" : "hurt");
     if (reason !== "retry") {
       const segment = checkpoints.filter(mark => checkpointX >= mark).length;
@@ -1053,7 +1091,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     updateReleaseCue();
     if (!recoveryReady) {
       courier.update(dt, poseInput(dt > 0 ? (player.vx - oldVX) / dt : 0, dt > 0 ? (player.vy - oldVY) / dt : 0));
-      effects.update(dt, player, boostTime, state === "playing");
+      effects.update(dt, player, boostTime, machine.is(states.playing));
       ropePulse = Math.max(0, ropePulse - dt * 2.7);
     }
   }
@@ -1081,7 +1119,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
 
   function updateHud(force) {
     socialUI.district.textContent = HarborWorld.districtAt(player.x)?.name || "";
-    socialUI.invite.hidden = state !== "playing" || !nearbyDock();
+    socialUI.invite.hidden = !machine.is(states.playing) || !nearbyDock();
     document.querySelector(".route-label").textContent = targetPractice ? `${targetPractice.id}. MÜHÜRÜ ÇALIŞ` : "FENER İSKELESİ";
     ui.score.textContent = formatScore(score);
     ui.seals.innerHTML = `${sealCount} <span>/ 3</span>`;
@@ -1143,7 +1181,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
 
   function drawBackground(time) {
     const district = socialVisible() ? HarborWorld.districts.find(region => region.id === socialDock.id) : null;
-    const focus = district ? (district.from + district.to) / 2 : state === "menu" ? 150 : rendered.x;
+    const focus = district ? (district.from + district.to) / 2 : machine.is(states.menu) ? 150 : rendered.x;
     HarborWorld.drawBackground(ctx, viewX, time, focus);
   }
 
@@ -1338,7 +1376,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   }
 
   function drawSealLocator() {
-    if (state !== "playing" && state !== "paused") return;
+    if (!machine.is(states.playing) && !machine.is(states.paused)) return;
     const locator = getSealLocator(viewX);
     if (!locator) return;
     const x = locator.side === "right" ? W - 22 : 22;
@@ -1378,7 +1416,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   function drawPlayer() {
     ctx.save();
     if (invulnerable > 0) ctx.globalAlpha = 0.68 + Math.sin(visualTime * 24) * 0.18;
-    if (state === "menu") courier.draw(ctx, 955, 436, 2.3);
+    if (machine.is(states.menu)) courier.draw(ctx, 955, 436, 2.3);
     else courier.draw(ctx, rendered.x - viewX, rendered.y);
     ctx.restore();
   }
@@ -1488,13 +1526,13 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   }
 
   function togglePreview() {
-    if (state !== "playing" || practiceIndex < 0) return;
+    if (!machine.is(states.playing) || practiceIndex < 0) return;
     previewOn = !previewOn;
     updateHud(true);
   }
 
   function drawReleasePreview() {
-    if (state !== "playing" || practiceIndex < 0 || !previewOn || !tetherAnchor) return;
+    if (!machine.is(states.playing) || practiceIndex < 0 || !previewOn || !tetherAnchor) return;
     const cleanRelease = isCleanRelease(tetherAnchor);
     const { points, outcome } = predictReleasePath({
       player, steer: activeSteer(), boostTime, checkpointX,
@@ -1520,6 +1558,56 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     ctx.restore();
   }
 
+  function drawMenuWorld() {
+    for (let i = 0; i < 4; i += 1) drawAnchor({ x: 480 + i * 255, y: [340, 285, 380, 300][i], visited: false }, null);
+    drawPlayer();
+  }
+
+  function drawRouteWorld(time) {
+    const target = nearestAnchor();
+    if (viewX < 350) drawSafeDock(150 - viewX, 460, true);
+    checkpoints.forEach(drawCheckpoint);
+    for (const hazard of hazards) {
+      const x = hazard.x - viewX;
+      if (x > -70 && x < W + 70) drawHazard(hazard, time);
+    }
+    for (const anchor of anchors) drawAnchor(anchor, target);
+    for (const seal of seals) if (!targetPractice || seal.id === targetPractice.id) drawSeal(seal, time);
+    drawRope(target);
+    if (player.x > 16700) {
+      const dockX = ROUTE_END - viewX;
+      ctx.fillStyle = "#263d3c"; ctx.fillRect(dockX, 440, 280, 195);
+      ctx.fillStyle = "#56645a"; ctx.fillRect(dockX - 12, 436, 304, 8);
+      ctx.fillStyle = "#d6bd8c"; ctx.fillRect(dockX + 208, 318, 9, 118);
+      ctx.fillStyle = "#1c343b"; ctx.fillRect(dockX + 196, 298, 33, 26);
+      ctx.fillStyle = "#ffc36b"; ctx.shadowColor = "#ffc36b"; ctx.shadowBlur = 16;
+      ctx.fillRect(dockX + 208, 305, 9, 11); ctx.shadowBlur = 0;
+    }
+    drawReleasePreview();
+    effects.draw(ctx, viewX);
+    drawPlayer();
+    drawSealLocator();
+    for (const hazard of hazards) {
+      const pos = hazardPosition(hazard);
+      const dx = pos.x - player.x;
+      if (dx > 50 && dx < 390) {
+        ctx.fillStyle = "rgba(255,107,107,.85)";
+        ctx.beginPath(); ctx.moveTo(pos.x - viewX - 8, 79); ctx.lineTo(pos.x - viewX + 8, 79); ctx.lineTo(pos.x - viewX, 92); ctx.closePath(); ctx.fill();
+      }
+    }
+  }
+
+  function drawLegacyWorld(time) {
+    if (socialVisible()) drawSocialWorld(time);
+    else if (!machine.is(states.menu) && !(machine.is(states.map) && mapOrigin === states.menu) && !(machine.is(states.history) && logOrigin === states.menu)) drawRouteWorld(time);
+    else drawMenuWorld();
+  }
+
+  function updateIdleVisuals(dt) {
+    courier.update(dt, poseInput());
+    effects.update(dt, null, 0, false);
+  }
+
   function draw(time) {
     const rect = canvas.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
@@ -1542,44 +1630,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     ctx.translate(offset.x, offset.y);
     drawBackground(time);
 
-    if (socialVisible()) {
-      drawSocialWorld(time);
-    } else if (state !== "menu" && !(state === "map" && mapOrigin === "menu") && !(state === "history" && logOrigin === "menu")) {
-      const target = nearestAnchor();
-      if (viewX < 350) drawSafeDock(150 - viewX, 460, true);
-      checkpoints.forEach(drawCheckpoint);
-      for (const hazard of hazards) {
-        const x = hazard.x - viewX;
-        if (x > -70 && x < W + 70) drawHazard(hazard, time);
-      }
-      for (const anchor of anchors) drawAnchor(anchor, target);
-      for (const seal of seals) if (!targetPractice || seal.id === targetPractice.id) drawSeal(seal, time);
-      drawRope(target);
-      if (player.x > 16700) {
-        const dockX = ROUTE_END - viewX;
-        ctx.fillStyle = "#263d3c"; ctx.fillRect(dockX, 440, 280, 195);
-        ctx.fillStyle = "#56645a"; ctx.fillRect(dockX - 12, 436, 304, 8);
-        ctx.fillStyle = "#d6bd8c"; ctx.fillRect(dockX + 208, 318, 9, 118);
-        ctx.fillStyle = "#1c343b"; ctx.fillRect(dockX + 196, 298, 33, 26);
-        ctx.fillStyle = "#ffc36b"; ctx.shadowColor = "#ffc36b"; ctx.shadowBlur = 16;
-        ctx.fillRect(dockX + 208, 305, 9, 11); ctx.shadowBlur = 0;
-      }
-      drawReleasePreview();
-      effects.draw(ctx, viewX);
-      drawPlayer();
-      drawSealLocator();
-      for (const hazard of hazards) {
-        const pos = hazardPosition(hazard);
-        const dx = pos.x - player.x;
-        if (dx > 50 && dx < 390) {
-          ctx.fillStyle = "rgba(255,107,107,.85)";
-          ctx.beginPath(); ctx.moveTo(pos.x - viewX - 8, 79); ctx.lineTo(pos.x - viewX + 8, 79); ctx.lineTo(pos.x - viewX, 92); ctx.closePath(); ctx.fill();
-        }
-      }
-    } else {
-      for (let i = 0; i < 4; i += 1) drawAnchor({ x: 480 + i * 255, y: [340, 285, 380, 300][i], visited: false }, null);
-      drawPlayer();
-    }
+    machine.draw(time);
     effects.drawFlash(ctx, W, H);
     ctx.restore();
   }
@@ -1588,7 +1639,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     if (!soundOn) return;
     try {
       audio ||= new AudioContext();
-      if (audio.state === "suspended") audio.resume();
+      if (audio.machine.is(states.suspended)) audio.resume();
       const oscillator = audio.createOscillator();
       const gain = audio.createGain();
       oscillator.type = type;
@@ -1612,22 +1663,21 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     if (!lastFrame) lastFrame = timestamp;
     const dt = Math.min(0.035, Math.max(0, (timestamp - lastFrame) / 1000));
     lastFrame = timestamp;
-    if (state !== "paused" && state !== "map" && state !== "history") visualTime += dt;
-    if (state === "exploring" || state === "playing" && !recoveryReady) {
+    if (!machine.is(states.paused) && !machine.is(states.map) && !machine.is(states.history)) visualTime += dt;
+    if (machine.is(states.exploring) || machine.is(states.playing) && !recoveryReady) {
       frameAccumulator += dt;
-      while (frameAccumulator >= PHYSICS_DT - 1e-9 && (state === "exploring" || state === "playing" && !recoveryReady)) {
-        if (state === "exploring") updateSocial(PHYSICS_DT);
+      while (frameAccumulator >= PHYSICS_DT - 1e-9 && (machine.is(states.exploring) || machine.is(states.playing) && !recoveryReady)) {
+        if (machine.is(states.exploring)) updateSocial(PHYSICS_DT);
         else { options.beforeStep?.(); update(PHYSICS_DT); }
         frameAccumulator = Math.max(0, frameAccumulator - PHYSICS_DT);
       }
-      if (state !== "exploring" && (state !== "playing" || recoveryReady)) frameAccumulator = 0;
+      if (!machine.is(states.exploring) && (!machine.is(states.playing) || recoveryReady)) frameAccumulator = 0;
     } else {
       frameAccumulator = 0;
     }
-    renderAlpha = state === "exploring" || state === "playing" && !recoveryReady ? Math.min(1, frameAccumulator / PHYSICS_DT) : 1;
-    if (state !== "paused" && state !== "map" && state !== "history" && state !== "exploring" && (state !== "playing" || recoveryReady)) {
-      courier.update(dt, poseInput());
-      effects.update(dt, null, 0, false);
+    renderAlpha = machine.is(states.exploring) || machine.is(states.playing) && !recoveryReady ? Math.min(1, frameAccumulator / PHYSICS_DT) : 1;
+    if (!machine.is(states.paused) && !machine.is(states.map) && !machine.is(states.history) && !machine.is(states.exploring) && (!machine.is(states.playing) || recoveryReady)) {
+      machine.update(dt, "idle");
     }
     draw(visualTime);
     requestAnimationFrame(frame);
@@ -1635,7 +1685,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
 
   const keys = new Set();
   function startRecovery() {
-    if (state !== "playing" || !recoveryReady) return;
+    if (!machine.is(states.playing) || !recoveryReady) return;
     recoveryReady = false;
     invulnerable = 2.1;
     courier.event("recover");
@@ -1647,10 +1697,10 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     if (["Space", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.code)) event.preventDefault();
     if (event.repeat) return;
     if (event.code === "KeyH") { toggleLog(); return; }
-    if (state === "history") { if (event.code === "Escape") toggleLog(); return; }
+    if (machine.is(states.history)) { if (event.code === "Escape") toggleLog(); return; }
     if (event.code === "KeyM") { toggleMap(); return; }
-    if (state === "map") { if (event.code === "Escape") toggleMap(); return; }
-    if (state === "exploring") {
+    if (machine.is(states.map)) { if (event.code === "Escape") toggleMap(); return; }
+    if (machine.is(states.exploring)) {
       if (event.code === "KeyF") { toggleFullscreen(); return; }
       if (conversation) {
         if (event.code === "Escape") closeConversation();
@@ -1663,10 +1713,10 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
       if (event.code === "Escape" || event.code === "KeyP") { pauseGame(); return; }
       keys.add(event.code); return;
     }
-    if (state === "playing" && event.code === "KeyE") {
+    if (machine.is(states.playing) && event.code === "KeyE") {
       const dock = nearbyDock(); if (dock) enterHarbor(dock.id); return;
     }
-    if (state === "paused" && ["Space", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "KeyA", "KeyD", "KeyW", "KeyS"].includes(event.code)) return;
+    if (machine.is(states.paused) && ["Space", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "KeyA", "KeyD", "KeyW", "KeyS"].includes(event.code)) return;
     if (recoveryReady && recoveryBlockedKeys.has(event.code)) return;
     if (["Space", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "KeyA", "KeyD", "KeyW", "KeyS"].includes(event.code)) startRecovery();
     keys.add(event.code);
@@ -1674,15 +1724,15 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     if (event.code === "KeyG") togglePreview();
     if (event.code === "KeyF") toggleFullscreen();
     if (event.code === "Escape" || event.code === "KeyP") {
-      if (state === "playing") pauseGame(); else if (state === "paused") resumeGame();
+      if (machine.is(states.playing)) pauseGame(); else if (machine.is(states.paused)) resumeGame();
     }
-    if (event.code === "KeyR" && state === "playing" && practiceIndex >= 0) {
+    if (event.code === "KeyR" && machine.is(states.playing) && practiceIndex >= 0) {
       invulnerable = 0;
       takeHit("retry");
       ui.combo.textContent = "TEKRAR DENEME";
       messageUntil = elapsed + 0.9;
-    } else if (event.code === "KeyR" && (state === "won" || state === "lost")) restartCurrentRun();
-    if (state === "menu" && ["Digit1", "Digit2", "Digit3"].includes(event.code)) {
+    } else if (event.code === "KeyR" && (machine.is(states.won) || machine.is(states.lost))) restartCurrentRun();
+    if (machine.is(states.menu) && ["Digit1", "Digit2", "Digit3"].includes(event.code)) {
       resetRun(Number(event.code.slice(-1)) - 1);
     }
   });
@@ -1690,7 +1740,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     recoveryBlockedKeys.delete(event.code);
     if (savedFlight) savedFlight.blockedKeys = savedFlight.blockedKeys.filter(key => key !== event.code);
     keys.delete(event.code);
-    if (event.code === "Space" && tetherPointerId === null && state === "playing") releaseTether();
+    if (event.code === "Space" && tetherPointerId === null && machine.is(states.playing)) releaseTether();
   });
   window.addEventListener("blur", () => {
     keys.clear(); steerPointer.clear(); tetherPointerY.clear();
@@ -1709,7 +1759,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   });
 
   function beginTetherPointer(event) {
-    if (event.pointerType === "touch" || state !== "playing" || event.button !== 0 || tetherPointerId !== null) return;
+    if (event.pointerType === "touch" || !machine.is(states.playing) || event.button !== 0 || tetherPointerId !== null) return;
     startRecovery();
     if (!tetherHeld) beginTether();
     if (!tetherHeld) return;
@@ -1729,7 +1779,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     if (tetherPointerId !== event.pointerId) return;
     tetherPointerId = null;
     tetherPointerY.clear();
-    if (state === "playing") releaseTether();
+    if (machine.is(states.playing)) releaseTether();
   }
 
   canvas.addEventListener("pointerdown", beginTetherPointer);
@@ -1742,7 +1792,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     const direction = Number(button.dataset.steer);
     button.addEventListener("pointerdown", event => {
       event.preventDefault();
-      if (state !== "playing") return;
+      if (!machine.is(states.playing)) return;
       startRecovery();
       steerPointer.set(event.pointerId, direction);
       try { button.setPointerCapture(event.pointerId); } catch { /* Pointer capture is optional. */ }
@@ -1769,7 +1819,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   }
   ui.tutorialSkip.addEventListener("click", completeTutorial);
   document.querySelector("#explore-button").addEventListener("click", () => enterHarbor("rihtim"));
-  document.querySelector("#after-delivery-button").addEventListener("click", () => enterHarbor(state === "won" ? "fener" : "rihtim"));
+  document.querySelector("#after-delivery-button").addEventListener("click", () => enterHarbor(machine.is(states.won) ? "fener" : "rihtim"));
   socialUI.leave.addEventListener("click", leaveHarbor);
   document.querySelector("#harbor-map-button").addEventListener("click", toggleMap);
   document.querySelector("#map-close").addEventListener("click", toggleMap);
@@ -1782,8 +1832,8 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   document.querySelector("#restart-button").addEventListener("click", restartCurrentRun);
   document.querySelector("#replay-button").addEventListener("click", restartCurrentRun);
   document.querySelector("#normal-shift-button").addEventListener("click", () => resetRun(-1));
-  document.querySelector("#menu-button").addEventListener("click", () => { state = "menu"; setPanels(); });
-  document.querySelector("#result-menu-button").addEventListener("click", () => { state = "menu"; setPanels(); });
+  document.querySelector("#menu-button").addEventListener("click", () => { machine.transition(states.menu, { kind: "menu" }); });
+  document.querySelector("#result-menu-button").addEventListener("click", () => { machine.transition(states.menu, { kind: "menu" }); });
   ui.pauseButton.addEventListener("click", event => { event.stopPropagation(); pauseGame(); });
   ui.previewButton.addEventListener("click", togglePreview);
   function setSoundPreference() {
@@ -1825,12 +1875,12 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   ui.bestStart.textContent = formatScore(best);
   ui.bestTimeStart.textContent = formatRunTime(bestTime);
   ui.deliveryTimeStart.textContent = formatRunTime(bestDeliveryTime);
-  setPanels();
+  machine.start();
   requestAnimationFrame(frame);
   if (options.debug === true) return {
     resetRun, update, updateHud, updateSpecialRing, takeHit, beginTether, releaseTether, predictReleasePath, drawReleasePreview, togglePreview, isCleanRelease, releaseQuality,
     pauseGame, resumeGame, finishRun, computeResult, nearestAnchor, player, anchors, seals, keys,
-    state: () => state,
+    state: () => machine.current.id,
     practiceIndex: () => practiceIndex,
     remaining: () => remaining,
     lives: () => lives,
