@@ -83,26 +83,34 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     a: 0.22 + ((i * 11) % 50) / 100
   }));
 
-  const states = {
+  const states = Object.freeze({
     menu: Object.freeze({
       id: "menu",
       enter(context) { if (context.kind === "menu" || context.kind === "startup") setPanels(); },
       update: updateIdleVisuals,
       draw: drawMenuWorld,
+      animate: true,
+      canStep: () => false,
       exit() {}
     }),
-    playing: pendingState("playing"),
+    playing: Object.freeze({
+      id: "playing", enter: enterPlaying, update: updatePlaying, draw: drawRouteWorld,
+      animate: true, canStep: () => !recoveryReady, exit() {}
+    }),
     exploring: pendingState("exploring"),
     paused: pendingState("paused"),
     map: pendingState("map"),
     history: pendingState("history"),
     won: pendingState("won"),
     lost: pendingState("lost")
-  };
+  });
   const machine = createStateMachine(states, states.menu);
 
   function pendingState(id) {
-    return Object.freeze({ id, enter() {}, update: updateIdleVisuals, draw: drawLegacyWorld, exit() {} });
+    const animate = !["paused", "map", "history"].includes(id);
+    return Object.freeze({ id, animate, canStep: () => id === "exploring", enter() {},
+      update(dt, phase) { if (phase === "fixed") updateSocial(dt); else if (animate) updateIdleVisuals(dt); },
+      draw: drawLegacyWorld, exit() {} });
   }
 
   function createStateMachine(definitions, initial) {
@@ -379,7 +387,11 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     tetherTime = 0; fragileWarningPlayed = false;
     tutorialActive = practiceIndex < 0 && !hasCompletedTutorial(); tutorialStep = 0; tutorialTimer = 0;
     steerPointer.clear(); tetherPointerY.clear(); tetherPointerId = null; keys.clear();
-    machine.transition(states.playing, { kind: "legacy" });
+    machine.transition(states.playing, { kind: "reset" });
+  }
+
+  function enterPlaying(context) {
+    if (context.kind !== "reset") return;
     effects.reset(); effects.reduced = motionReduced; ropePulse = 0;
     syncVisualPosition(); courier.reset(poseInput());
     resetFrameClock();
@@ -387,6 +399,11 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     setPanels();
     updateHud(true);
     playTone(540, 0.075, "sine");
+  }
+
+  function updatePlaying(dt, phase) {
+    if (phase === "idle") updateIdleVisuals(dt);
+    else { options.beforeStep?.(); update(dt); }
   }
 
   function startSealPractice(id) {
@@ -1639,7 +1656,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     if (!soundOn) return;
     try {
       audio ||= new AudioContext();
-      if (audio.machine.is(states.suspended)) audio.resume();
+      if (audio.state === "suspended") audio.resume();
       const oscillator = audio.createOscillator();
       const gain = audio.createGain();
       oscillator.type = type;
@@ -1663,22 +1680,19 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     if (!lastFrame) lastFrame = timestamp;
     const dt = Math.min(0.035, Math.max(0, (timestamp - lastFrame) / 1000));
     lastFrame = timestamp;
-    if (!machine.is(states.paused) && !machine.is(states.map) && !machine.is(states.history)) visualTime += dt;
-    if (machine.is(states.exploring) || machine.is(states.playing) && !recoveryReady) {
+    if (machine.current.animate) visualTime += dt;
+    if (machine.current.canStep()) {
       frameAccumulator += dt;
-      while (frameAccumulator >= PHYSICS_DT - 1e-9 && (machine.is(states.exploring) || machine.is(states.playing) && !recoveryReady)) {
-        if (machine.is(states.exploring)) updateSocial(PHYSICS_DT);
-        else { options.beforeStep?.(); update(PHYSICS_DT); }
+      while (frameAccumulator >= PHYSICS_DT - 1e-9 && machine.current.canStep()) {
+        machine.update(PHYSICS_DT, "fixed");
         frameAccumulator = Math.max(0, frameAccumulator - PHYSICS_DT);
       }
-      if (!machine.is(states.exploring) && (!machine.is(states.playing) || recoveryReady)) frameAccumulator = 0;
+      if (!machine.current.canStep()) frameAccumulator = 0;
     } else {
       frameAccumulator = 0;
     }
-    renderAlpha = machine.is(states.exploring) || machine.is(states.playing) && !recoveryReady ? Math.min(1, frameAccumulator / PHYSICS_DT) : 1;
-    if (!machine.is(states.paused) && !machine.is(states.map) && !machine.is(states.history) && !machine.is(states.exploring) && (!machine.is(states.playing) || recoveryReady)) {
-      machine.update(dt, "idle");
-    }
+    renderAlpha = machine.current.canStep() ? Math.min(1, frameAccumulator / PHYSICS_DT) : 1;
+    if (!machine.current.canStep()) machine.update(dt, "idle");
     draw(visualTime);
     requestAnimationFrame(frame);
   }
@@ -1879,7 +1893,8 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   requestAnimationFrame(frame);
   if (options.debug === true) return {
     resetRun, update, updateHud, updateSpecialRing, takeHit, beginTether, releaseTether, predictReleasePath, drawReleasePreview, togglePreview, isCleanRelease, releaseQuality,
-    pauseGame, resumeGame, finishRun, computeResult, nearestAnchor, player, anchors, seals, keys,
+    pauseGame, resumeGame, finishRun, computeResult, createStateMachine, nearestAnchor, player, anchors, seals, keys,
+    stateDefinitions: () => states,
     state: () => machine.current.id,
     practiceIndex: () => practiceIndex,
     remaining: () => remaining,
