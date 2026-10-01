@@ -84,6 +84,46 @@ const out=path.join(__dirname,'evidence'); fs.mkdirSync(out,{recursive:true});
     await page.locator('[data-dock="fener"]').click();
     assert.equal(await page.locator('#social-place').textContent(),'Fener İskelesi');
 
+    // Use native storage and a fresh origin session before any game script reads it.
+    const hostileContext = await browser.newContext();
+    const hostilePage = await hostileContext.newPage();
+    hostilePage.on('pageerror', e => errors.push(e.message));
+    const payload = `<img src=x onerror=globalThis.__injected=1>`;
+    const hostileText = `${payload}&<>"'`;
+    await hostilePage.addInitScript(({ payload, hostileText }) => {
+      window.requestAnimationFrame = () => 0;
+      const row = { at: '2026-10-01T00:00:00.000Z', won: false, seals: 2, score: 1200,
+        time: 10, hits: 1, cleanThrows: 4, splits: [5, 10], reason: payload };
+      localStorage.setItem('sapan-postasi-voyages-v1', JSON.stringify({ version: 1,
+        runs: [row, { ...row, at: hostileText }, { ...row, score: hostileText }] }));
+      localStorage.setItem('sapan-postasi-sohbet-v1', JSON.stringify([hostileText, 'emine']));
+    }, { payload, hostileText });
+    await hostilePage.goto(url + '/');
+    await hostilePage.evaluate(() => {
+      const g = window.__hostileGame = SapanGame.create({ debug: true, testRun: true });
+      g.toggleLog();
+    });
+    assert.equal(await hostilePage.locator('#log-rows tr').count(), 1);
+    assert.match(await hostilePage.locator('#log-rows').textContent(), /Yarım kaldı/);
+    await hostilePage.evaluate(hostileText => {
+      const g = window.__hostileGame;
+      g.toggleLog(); g.resetRun(-1); g.update(.1);
+      g.splitTimes().push({ name: hostileText, at: g.runTime() }); g.finishRun(false);
+    }, hostileText);
+    assert.equal(await hostilePage.locator('#result-splits li span').textContent(), hostileText);
+    await hostilePage.evaluate(hostileText => {
+      const g = window.__hostileGame;
+      const node = HarborSocial.getNode('okan'); node.choices[0].text = hostileText;
+      g.enterHarbor('vinc'); g.player.x = 5720; g.openConversation();
+    }, hostileText);
+    assert.equal(await hostilePage.locator('#dialogue-choices button').first().textContent(), `1${hostileText}`);
+    assert.equal(await hostilePage.locator('#log-rows img, #result-splits img, #dialogue-choices img').count(), 0);
+    await hostilePage.waitForTimeout(100);
+    assert.equal(await hostilePage.evaluate(() => globalThis.__injected), undefined);
+    await hostilePage.locator('#dialogue-choices button').first().click();
+    assert.equal(await hostilePage.evaluate(() => window.__hostileGame.conversation().node), 'eldiven');
+    await hostileContext.close();
+
     await context.setOffline(true);
     const file='file:///'+path.resolve(__dirname,'..','index.html').replaceAll('\\','/');
     await page.goto(file);
@@ -92,6 +132,6 @@ const out=path.join(__dirname,'evidence'); fs.mkdirSync(out,{recursive:true});
     assert.equal(await page.locator('#dialogue-name').textContent(),'Emine abla');
     assert.equal(await page.locator('#dialogue').isVisible(),true);
     assert.deepEqual(errors,[]);
-    console.log(JSON.stringify({errors,lengths,settingsReload:true,shortPc:true,offlineFile:true,screenshots:out},null,2));
+    console.log(JSON.stringify({errors,lengths,settingsReload:true,shortPc:true,hostileStorage:true,offlineFile:true,screenshots:out},null,2));
   } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

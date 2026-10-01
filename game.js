@@ -531,13 +531,19 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     return { best, bestTime, bestDeliveryTime, timeRecord, deliveryRecord };
   }
 
+  // Template structure stays fixed; encode data for both text and quoted attributes.
+  function escapeHtml(value) {
+    return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+  }
+
   function renderResultSplits(result) {
     let previousSplit = 0;
     ui.splits.innerHTML = result.splits.map(split => {
       const displayedSplit = Math.floor(split.at * 100 + 1e-9);
       const duration = (displayedSplit - previousSplit) / 100;
       previousSplit = displayedSplit;
-      return `<li><span>${split.name}</span><b>${formatRunTime(split.at)}</b><small>+${formatRunTime(duration)}</small></li>`;
+      return `<li><span>${escapeHtml(split.name)}</span><b>${escapeHtml(formatRunTime(split.at))}</b><small>+${escapeHtml(formatRunTime(duration))}</small></li>`;
     }).join("");
     ui.splits.hidden = result.splits.length === 0 || Boolean(result.targetPractice);
   }
@@ -722,8 +728,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     socialUI.name.textContent = conversation.person.name;
     socialUI.role.textContent = conversation.person.role || "Çevrene bakıyorsun";
     socialUI.text.textContent = conversation.text;
-    const escape = value => String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;");
-    socialUI.choices.innerHTML = conversation.choices.map((item, i) => `<button type="button" data-answer="${i}"><kbd>${i + 1}</kbd>${escape(item.text)}</button>`).join("");
+    socialUI.choices.innerHTML = conversation.choices.map((item, i) => `<button type="button" data-answer="${i}"><kbd>${i + 1}</kbd>${escapeHtml(item.text)}</button>`).join("");
     for (const button of document.querySelectorAll("[data-answer]")) button.addEventListener("click", () => chooseConversation(Number(button.dataset.answer)));
   }
 
@@ -770,7 +775,8 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     document.querySelector("#log-rows").innerHTML = runs.map(run => {
       const at = new Date(run.at).toLocaleString("tr-TR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" });
       const outcome = run.won ? run.seals === 3 ? "Teslim edildi" : "Fenere vardın" : run.reason === "timeout" ? "Süre doldu" : "Yarım kaldı";
-      return `<tr><td>${at}</td><td>${outcome}</td><td>${run.seals}/3</td><td>${formatRunTime(run.time)}</td><td>${formatScore(run.score)}</td><td>${run.cleanThrows}</td><td>${run.hits}</td></tr>`;
+      return `<tr>${[at, outcome, `${run.seals}/3`, formatRunTime(run.time), formatScore(run.score), run.cleanThrows, run.hits]
+        .map(value => `<td>${escapeHtml(value)}</td>`).join("")}</tr>`;
     }).join("");
   }
 
@@ -1176,7 +1182,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     const markup = seals.map(seal => {
       const status = final && !seal.collected ? "missed" : getSealStatus(seal);
       const label = status === "collected" ? "alındı" : status === "missed" ? final ? "eksik" : "geçildi" : "ileride";
-      return `<li class="is-${status}" aria-label="Mühür ${seal.id}: ${label}" title="${seal.id}. mühür: ${label}">${seal.id}</li>`;
+      return `<li class="is-${escapeHtml(status)}" aria-label="Mühür ${escapeHtml(seal.id)}: ${escapeHtml(label)}" title="${escapeHtml(seal.id)}. mühür: ${escapeHtml(label)}">${escapeHtml(seal.id)}</li>`;
     }).join("");
     if (node.innerHTML !== markup) node.innerHTML = markup;
   }
@@ -1194,7 +1200,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     socialUI.invite.hidden = !machine.is(states.playing) || !nearbyDock();
     document.querySelector(".route-label").textContent = targetPractice ? `${targetPractice.id}. MÜHÜRÜ ÇALIŞ` : "FENER İSKELESİ";
     ui.score.textContent = formatScore(score);
-    ui.seals.innerHTML = `${sealCount} <span>/ 3</span>`;
+    ui.seals.innerHTML = `${escapeHtml(sealCount)} <span>/ 3</span>`;
     renderSealMarks(ui.sealMarks);
     ui.lives.setAttribute("aria-label", `${lives} can`);
     ui.lives.style.display = practiceIndex >= 0 ? "none" : "";
@@ -1228,24 +1234,24 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
         ? "MAKARA İPİ TOPLUYOR · TUTUN'da ↓ ile diren · parmağını kaldır: bırak"
         : "TUTUN'da ↑ kısalt · ↓ uzat · başlangıca dön: dur";
     } else if (tetherAnchor?.type === "fragile") {
-      hint = `KIRILGAN HALKA · ${Math.max(0, FRAGILE_HOLD_SECONDS - tetherTime).toFixed(1)} sn · <kbd>SPACE</kbd>/fareyi bırak`;
+      hint = `KIRILGAN HALKA · ${escapeHtml(Math.max(0, FRAGILE_HOLD_SECONDS - tetherTime).toFixed(1))} sn · <kbd>SPACE</kbd>/fareyi bırak`;
     } else if (tetherAnchor?.type === "winch") {
       hint = "MAKARA İPİ TOPLUYOR · <kbd>S</kbd> ile diren · <kbd>SPACE</kbd>/fareyi bırak";
     } else if (tetherAnchor) {
       hint = "<kbd>↑</kbd>/<kbd>W</kbd> kısalt · <kbd>↓</kbd>/<kbd>S</kbd> uzat · <kbd>SPACE</kbd> bırak";
     } else if (target?.anchor.type === "fragile") {
-      hint = `KIRMIZI HALKA · 1,55 sn içinde bırak · <kbd>${holdControl}</kbd> bas`;
+      hint = `KIRMIZI HALKA · 1,55 sn içinde bırak · <kbd>${escapeHtml(holdControl)}</kbd> bas`;
     } else if (target?.anchor.type === "winch") {
-      hint = `MAKARA HALKASI · ipi toplar · <kbd>${holdControl}</kbd> bas`;
+      hint = `MAKARA HALKASI · ipi toplar · <kbd>${escapeHtml(holdControl)}</kbd> bas`;
     } else {
-      hint = target ? `Halkaya tutunmak için <kbd>${holdControl}</kbd> basılı tut` : "Sonraki halkaya yaklaş";
+      hint = target ? `Halkaya tutunmak için <kbd>${escapeHtml(holdControl)}</kbd> basılı tut` : "Sonraki halkaya yaklaş";
     }
     if (practiceIndex >= 0 && tetherAnchor && previewOn) hint += " · Noktalı yol: yaklaşık uçuş";
     const routeSeal = tetherAnchor && seals.find(seal => seal.approachRing === tetherAnchor.id && getSealStatus(seal) === "waiting");
     if (!recoveryReady && routeSeal) {
       const routeTip = routeSeal.id === 1 ? "1. MÜHÜR AŞAĞIDA" : routeSeal.id === 2
         ? "2. MÜHÜR ↑ · Daha uzun ip dene" : "3. MÜHÜR ↑ · İpi kısalt, daha geç bırak";
-      hint += ` · ${routeTip}`;
+      hint += ` · ${escapeHtml(routeTip)}`;
     }
     ui.hint.innerHTML = hint;
     updateReleaseCue();
@@ -1261,10 +1267,10 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     const percent = x => (Math.max(0, Math.min(ROUTE_END, x)) / ROUTE_END * 100).toFixed(3);
     const segments = document.querySelector("#map-segments");
     if (!segments.innerHTML) segments.innerHTML = HarborWorld.districts.map((district, i) =>
-      `<span style="width:${percent(district.to - district.from)}%;background:${["#547e77","#86946b","#b18b55","#537d9a","#827597"][i]}" title="${district.name}"></span>`).join("");
+      `<span style="width:${percent(district.to - district.from)}%;background:${["#547e77","#86946b","#b18b55","#537d9a","#827597"][i]}" title="${escapeHtml(district.name)}"></span>`).join("");
     const checkpointMarks = checkpoints.map(mark => `<b class="map-checkpoint${checkpointX >= mark ? " is-reached" : ""}" style="left:${percent(mark)}%" title="Güvenli iskele"></b>`);
-    const sealMarks = seals.map(seal => `<b class="map-seal is-${getSealStatus(seal)}${seal.id === targetPractice?.id ? " is-target" : ""}" style="left:${percent(seal.x)}%" title="${seal.id}. mühür">${seal.id}</b>`);
-    const specialMarks = anchors.filter(anchor => anchor.type !== "normal").map(anchor => `<b class="map-special is-${anchor.type}${anchor.visited ? " is-visited" : ""}" style="left:${percent(anchor.x)}%" title="${anchor.type === "fragile" ? "Kırılgan halka" : "Makara"}">${anchor.type === "fragile" ? "×" : "⌄"}</b>`);
+    const sealMarks = seals.map(seal => `<b class="map-seal is-${escapeHtml(getSealStatus(seal))}${seal.id === targetPractice?.id ? " is-target" : ""}" style="left:${percent(seal.x)}%" title="${escapeHtml(seal.id)}. mühür">${escapeHtml(seal.id)}</b>`);
+    const specialMarks = anchors.filter(anchor => anchor.type !== "normal").map(anchor => `<b class="map-special is-${escapeHtml(anchor.type)}${anchor.visited ? " is-visited" : ""}" style="left:${percent(anchor.x)}%" title="${anchor.type === "fragile" ? "Kırılgan halka" : "Makara"}">${anchor.type === "fragile" ? "×" : "⌄"}</b>`);
     const landmarks = document.querySelector("#map-landmarks");
     const markup = [...checkpointMarks, ...sealMarks, ...specialMarks].join("");
     if (landmarks.innerHTML !== markup) landmarks.innerHTML = markup;

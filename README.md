@@ -94,7 +94,10 @@ node work/check-log.cjs
 node work/check-progression.cjs
 node work/check-result.cjs
 node work/check-state-machine.cjs
+node work/check-rendering.cjs
 ```
+
+Veri içeren HTML şablonları tek `escapeHtml` yardımcısını kullanır; metin ve tırnaklı öznitelik değerleri HTML olarak yorumlanmaz. `check-rendering`, zararlı localStorage kayıtlarını, sonuç bölümlerini, sohbet seçeneklerini ve harita özniteliklerini denetler. Gerçek tarayıcıdaki `browser-progression-check` de zararlı depolamayla açılışı, metnin birebir görünmesini, HTML elemanı oluşmamasını ve cevap düğmesinin çalışmasını doğrular.
 
 İlk test; antrenman modlarını, yeniden denemeyi, süreyi, özel halkaları, rekor ayrımını, bozuk/engellenmiş depolamayı, iskele sürelerini, güvenli kurtarmayı ve uçuş önizlemesinin gerçek oyun fiziğiyle eşleşmesini kontrol eder. Parkur testi, aynı girdilerle tekrarlanabilir bir kontrol stratejisinin vardiyayı bitirdiğini doğrular. Kare döngüsü testi, kaydedilen bütün parkur girdilerini 30/60/120/144/180 Hz çizim döngülerinde oynatıp konum, süre, iskele geçişleri ve düşüşlerin birebir eşleştiğini kontrol eder.
 

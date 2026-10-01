@@ -6,7 +6,7 @@ const checks = [
   "check-game", "playtest-route", "check-frame-loop", "check-delivery",
   "check-courier", "check-motion", "check-world", "check-social",
   "check-harbor", "check-harbor-map", "check-target", "check-target-practice",
-  "check-log", "check-progression", "check-result", "check-state-machine"
+  "check-log", "check-progression", "check-result", "check-state-machine", "check-rendering"
 ];
 
 function run(args) {
