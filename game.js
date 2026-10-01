@@ -107,7 +107,11 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
       draw(time) { drawOriginWorld(pauseOrigin, time); },
       animate: false, canStep: () => false, exit() {}
     }),
-    map: pendingState("map"),
+    map: Object.freeze({
+      id: "map", enter: enterMap, update() {},
+      draw(time) { drawOriginWorld(mapOrigin, time); },
+      animate: false, canStep: () => false, exit() {}
+    }),
     history: pendingState("history"),
     won: pendingState("won"),
     lost: pendingState("lost")
@@ -714,7 +718,12 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   function toggleMap() {
     if (machine.is(states.map)) { machine.transition(mapOrigin, { kind: "legacy" }); resetFrameClock(); setPanels(); return; }
     if (!machine.in([states.playing, states.exploring, states.menu])) return;
-    mapOrigin = machine.current; machine.transition(states.map, { kind: "legacy" }); keys.clear(); resetFrameClock(); setPanels();
+    mapOrigin = machine.current;
+    machine.transition(states.map, { kind: "legacy" });
+  }
+
+  function enterMap() {
+    keys.clear(); resetFrameClock(); setPanels();
     document.querySelector("#map-copy").textContent = mapOrigin === states.playing
       ? "Vardiya duraklatıldı. İskeleye uğrarsan aynı noktadan yola dönebilirsin."
       : "Bir iskele seçip yürüyerek etrafına bak.";
