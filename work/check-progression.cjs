@@ -52,11 +52,8 @@ assert.equal(context.localStorage.getItem('sapan-postasi-motion'),'reduced');
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
 const production = fs.readFileSync(path.join(__dirname, '..', 'game.js'), 'utf8');
 assert.equal(production.includes('__playtestRun'), false);
-const defaultSource = production.replace(/\}\)\(\);\s*$/, `
-  globalThis.__defaultGame = { resetRun, finishRun };
-})();`);
 context.__playtestRun = true;
-vm.runInContext(defaultSource, context);
+context.__defaultGame = context.SapanGame.create({ debug: true });
 context.__defaultGame.resetRun(-1);
 context.__defaultGame.finishRun(true);
 assert.equal(log.list().length, 3, 'Default production startup must record normal runs');

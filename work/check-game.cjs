@@ -11,36 +11,6 @@ for (const id of referencedIds) {
   assert.ok(html.includes(`id="${id}"`), `Missing HTML node #${id}`);
 }
 assert.equal((html.match(/data-practice-start="[012]"/g) || []).length, 3);
-const source = original.replace("update(PHYSICS_DT);", "if (globalThis.__beforeFrameStep) globalThis.__beforeFrameStep(); update(PHYSICS_DT);").replace(/\}\)\(\);\s*$/, `
-  globalThis.__gameDebug = {
-    resetRun, update, updateHud, updateSpecialRing, takeHit, beginTether, releaseTether, predictReleasePath, drawReleasePreview, togglePreview, isCleanRelease, releaseQuality,
-    pauseGame, resumeGame, finishRun, computeResult, nearestAnchor, player, anchors, seals, keys,
-    state: () => state,
-    practiceIndex: () => practiceIndex,
-    remaining: () => remaining,
-    lives: () => lives,
-    sealCount: () => sealCount,
-    tetherAnchor: () => tetherAnchor,
-    tetherTime: () => tetherTime,
-    ropeLength: () => ropeLength, previewOn: () => previewOn, boostTime: () => boostTime, checkpointX: () => checkpointX,
-    stats: () => runStats,
-    runTime: () => runTime, splitTimes: () => splitTimes,
-    formatRunTime, readBestRunTime, saveBestRunTime,
-    frame, completeTutorial,
-    recoveryReady: () => recoveryReady, startRecovery, hazardPosition,
-    elapsed: () => elapsed, invulnerable: () => invulnerable,
-    getSealStatus, getSealLocator, drawSealLocator,
-    setCamera: x => { cameraX = x; },
-    draw, courier, effects, previous, rendered,
-    renderAlpha: () => renderAlpha, visualTime: () => visualTime,
-    enterHarbor, leaveHarbor, updateSocial, openConversation, chooseConversation, closeConversation, toggleMap, travelToDock,
-    socialDock: () => socialDock, conversation: () => conversation,
-    startSealPractice, restartCurrentRun, targetPractice: () => targetPractice,
-    toggleLog,
-  };
-})(globalThis.__gameOptions);`);
-assert.notEqual(source, original, "Test instrumentation must be inserted into the game closure");
-
 const nodes = new Map();
 function element(id) {
   if (!nodes.has(id)) {
@@ -84,7 +54,7 @@ function dispatchKeyUp(code) {
 }
 const storage = new Map([["sapan-postasi-best", "123"], ["sapan-postasi-tutorial", "done"]]);
 const context = {
-  __gameOptions: { testRun: true },
+  __gameOptions: { testRun: true, debug: true, beforeStep: () => context.__beforeFrameStep?.() },
   document: {
     querySelector: selector => element(selector),
     querySelectorAll: selector => selector === "[data-practice-start]" ? practiceButtons : [],
@@ -107,8 +77,9 @@ vm.createContext(context);
 for (const name of ["courier.js", "motion.js", "harbor-world.js", "harbor-social.js", "voyage-log.js", "level-data.js"]) {
   vm.runInContext(fs.readFileSync(path.join(__dirname, "..", name), "utf8"), context, { filename: name });
 }
-vm.runInContext(source, context, { filename: gamePath });
-const game = context.__gameDebug;
+vm.runInContext(original, context, { filename: gamePath });
+const game = context.SapanGame.create(context.__gameOptions);
+context.__gameDebug = game;
 
 assert.equal(game.anchors.length, 27);
 const expectedHeights = [305, 265, 370, 295, 405, 300, 345, 250, 390, 310, 420, 285, 360];

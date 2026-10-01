@@ -1,4 +1,4 @@
-((gameOptions) => {
+globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) {
   "use strict";
 
   const options = gameOptions ?? {};
@@ -1617,7 +1617,7 @@
       frameAccumulator += dt;
       while (frameAccumulator >= PHYSICS_DT - 1e-9 && (state === "exploring" || state === "playing" && !recoveryReady)) {
         if (state === "exploring") updateSocial(PHYSICS_DT);
-        else update(PHYSICS_DT);
+        else { options.beforeStep?.(); update(PHYSICS_DT); }
         frameAccumulator = Math.max(0, frameAccumulator - PHYSICS_DT);
       }
       if (state !== "exploring" && (state !== "playing" || recoveryReady)) frameAccumulator = 0;
@@ -1827,4 +1827,30 @@
   ui.deliveryTimeStart.textContent = formatRunTime(bestDeliveryTime);
   setPanels();
   requestAnimationFrame(frame);
-})();
+  if (options.debug === true) return {
+    resetRun, update, updateHud, updateSpecialRing, takeHit, beginTether, releaseTether, predictReleasePath, drawReleasePreview, togglePreview, isCleanRelease, releaseQuality,
+    pauseGame, resumeGame, finishRun, computeResult, nearestAnchor, player, anchors, seals, keys,
+    state: () => state,
+    practiceIndex: () => practiceIndex,
+    remaining: () => remaining,
+    lives: () => lives,
+    sealCount: () => sealCount,
+    tetherAnchor: () => tetherAnchor,
+    tetherTime: () => tetherTime,
+    ropeLength: () => ropeLength, previewOn: () => previewOn, boostTime: () => boostTime, checkpointX: () => checkpointX,
+    stats: () => runStats,
+    runTime: () => runTime, splitTimes: () => splitTimes,
+    formatRunTime, readBestRunTime, saveBestRunTime,
+    frame, completeTutorial,
+    recoveryReady: () => recoveryReady, startRecovery, hazardPosition,
+    elapsed: () => elapsed, invulnerable: () => invulnerable,
+    getSealStatus, getSealLocator, drawSealLocator,
+    setCamera: x => { cameraX = x; },
+    draw, syncVisualPosition, courier, effects, previous, rendered,
+    renderAlpha: () => renderAlpha, visualTime: () => visualTime,
+    enterHarbor, leaveHarbor, updateSocial, openConversation, chooseConversation, closeConversation, toggleMap, travelToDock,
+    socialDock: () => socialDock, conversation: () => conversation,
+    startSealPractice, restartCurrentRun, targetPractice: () => targetPractice,
+    toggleLog,
+  };
+} });

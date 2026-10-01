@@ -19,5 +19,6 @@ function run(args) {
 }
 
 run(["--check", "game.js"]);
+run(["--check", "game-start.js"]);
 run(["--check", "level-data.js"]);
 for (const check of checks) run([`work/${check}.cjs`]);
