@@ -97,7 +97,11 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
       id: "playing", enter: enterPlaying, update: updatePlaying, draw: drawRouteWorld,
       animate: true, canStep: () => !recoveryReady, exit() {}
     }),
-    exploring: pendingState("exploring"),
+    exploring: Object.freeze({
+      id: "exploring", enter: enterExploring, update: updateSocial,
+      draw(time) { drawOriginWorld(states.exploring, time); },
+      animate: true, canStep: () => true, exit() {}
+    }),
     paused: pendingState("paused"),
     map: pendingState("map"),
     history: pendingState("history"),
@@ -600,13 +604,18 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
       savedFlight = null;
     }
     socialDock = dock; visitedDocks.add(dock.id); conversation = null;
-    machine.transition(states.exploring, { kind: "legacy" });
+    machine.transition(states.exploring, { kind: "harbor" });
+    return true;
+  }
+
+  function enterExploring(context) {
+    if (context.kind !== "harbor") return;
+    const dock = socialDock;
     keys.clear(); recoveryBlockedKeys.clear();
     player.x = dock.id === "rihtim" ? 170 : dock.x - 120;
     player.y = dock.floor - 28; player.vx = 0; player.vy = 0;
     cameraX = Math.max(0, dock.x - W * 0.45);
     courier.reset(poseInput()); resetFrameClock(); setPanels(); updateSocialHud();
-    return true;
   }
 
   function leaveHarbor() {
@@ -1618,6 +1627,12 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     if (socialVisible()) drawSocialWorld(time);
     else if (!machine.is(states.menu) && !(machine.is(states.map) && mapOrigin === states.menu) && !(machine.is(states.history) && logOrigin === states.menu)) drawRouteWorld(time);
     else drawMenuWorld();
+  }
+
+  function drawOriginWorld(origin, time) {
+    if (socialVisible()) drawSocialWorld(time);
+    else if (origin === states.menu) drawMenuWorld();
+    else drawRouteWorld(time);
   }
 
   function updateIdleVisuals(dt) {
