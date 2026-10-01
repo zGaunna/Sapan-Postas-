@@ -117,7 +117,10 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
       draw(time) { drawOriginWorld(logOrigin, time); },
       animate: false, canStep: () => false, exit() {}
     }),
-    won: pendingState("won"),
+    won: Object.freeze({
+      id: "won", enter: enterWon, update: updateIdleVisuals, draw: drawRouteWorld,
+      animate: true, canStep: () => false, exit() {}
+    }),
     lost: pendingState("lost")
   });
   const machine = createStateMachine(states, states.menu);
@@ -589,7 +592,19 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
       runStats, splitTimes, seals, targetPractice, best, testRun: options.testRun });
     releaseTether({ award: false, consumeAnchor: false });
     boostTime = 0;
-    machine.transition(result.won ? states.won : states.lost, { kind: "legacy" });
+    if (result.won) {
+      machine.transition(states.won, { kind: "finish", result });
+      return;
+    }
+    machine.transition(states.lost, { kind: "legacy" });
+    applyFinishedResult(result);
+  }
+
+  function enterWon(context) {
+    if (context.kind === "finish") applyFinishedResult(context.result);
+  }
+
+  function applyFinishedResult(result) {
     delivered = result.delivered;
     score = result.score;
     splitTimes = result.splits;
