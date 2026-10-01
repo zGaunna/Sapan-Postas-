@@ -14,7 +14,7 @@ assert.equal((html.match(/data-practice-start="[012]"/g) || []).length, 3);
 const source = original.replace("update(PHYSICS_DT);", "if (globalThis.__beforeFrameStep) globalThis.__beforeFrameStep(); update(PHYSICS_DT);").replace(/\}\)\(\);\s*$/, `
   globalThis.__gameDebug = {
     resetRun, update, updateHud, updateSpecialRing, takeHit, beginTether, releaseTether, predictReleasePath, drawReleasePreview, togglePreview, isCleanRelease, releaseQuality,
-    pauseGame, resumeGame, finishRun, nearestAnchor, player, anchors, seals, keys,
+    pauseGame, resumeGame, finishRun, computeResult, nearestAnchor, player, anchors, seals, keys,
     state: () => state,
     practiceIndex: () => practiceIndex,
     remaining: () => remaining,

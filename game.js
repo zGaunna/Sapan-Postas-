@@ -389,96 +389,140 @@
     setPanels();
   }
 
-  function finishRun(won, reason = null) {
-    if (state !== "playing") return;
-    if (targetPractice && won && !seals.find(seal => seal.id === targetPractice.id)?.collected) {
+  function computeResultMessage({ won, reason, practice, sealCount, targetPractice }) {
+    if (targetPractice) return won
+      ? { kicker: "MÜHÜR ANTRENMANI TAMAM", title: `${targetPractice.id}. mührü aldın.`,
+        copy: "Aynı atışı tekrar çalışabilir veya normal vardiyada deneyebilirsin." }
+      : { kicker: "MÜHÜR ANTRENMANI", title: "Mühür geride kaldı.",
+        copy: "R veya Yeniden oyna ile aynı atışı tekrar dene. Normal vardiya kayıtların etkilenmez." };
+    if (!won) return { kicker: "VARDİYA BİTTİ", title: "Bu gece olmadı.",
+      copy: reason === "timeout"
+        ? "Vardiya süresi doldu. İskelelere daha kısa yoldan ulaşmayı deneyebilirsin."
+        : "Canların bitti. Zorlandığın kısmı antrenmanda yeniden deneyebilirsin." };
+    return {
+      kicker: practice ? "ANTRENMAN TAMAM" : sealCount === 3 ? "TESLİMAT TAMAM" : "FENERE VARDIN",
+      title: practice ? "Parkuru geçtin." : "Fener sönmeden yetiştin.",
+      copy: practice ? "Hazırsan vardiyada süreye karşı deneyebilirsin."
+        : sealCount === 3 ? "Üç mührü de teslim ettin. Bu gecelik işin bitti."
+          : `${sealCount}/3 mühür topladın. Tam teslimat için yeni vardiyada eksik mühürlerin rotasını dene.`
+    };
+  }
+
+  function computeResult(runState) {
+    const practice = runState.practiceIndex >= 0;
+    const targetPractice = runState.targetPractice ? { ...runState.targetPractice } : null;
+    let { won, reason } = runState;
+    if (targetPractice && won && !runState.seals.find(seal => seal.id === targetPractice.id)?.collected) {
       won = false; reason = "target-missed";
     }
-    releaseTether({ award: false, consumeAnchor: false });
-    boostTime = 0;
-    state = won ? "won" : "lost";
-    delivered = won && practiceIndex < 0 && sealCount === 3;
-    if (won) motionEvent("finish");
-    if (won && practiceIndex < 0) score += 500 + (sealCount === 3 ? 300 : 0) + Math.floor(remaining * 2);
-    const previousBest = best;
-    if (practiceIndex < 0) saveBest(score);
-    ui.resultScoreLabel.textContent = practiceIndex >= 0 ? "BU ANTRENMAN" : "BU VARDİYA";
-    ui.finalScore.textContent = formatScore(score);
-    ui.finalSeals.textContent = `${sealCount}/3`;
-    ui.finalHits.textContent = String(runStats.hits);
-    ui.finalThrows.textContent = String(runStats.cleanThrows);
+    const delivered = won && !practice && runState.sealCount === 3;
+    const score = runState.score + (won && !practice
+      ? 500 + (runState.sealCount === 3 ? 300 : 0) + Math.floor(runState.remaining * 2) : 0);
+    const splits = runState.splitTimes.map(split => ({ ...split }));
+    if (won && !targetPractice) splits.push({ name: "Fener iskelesi", at: runState.runTime });
+    return {
+      won, reason, state: won ? "won" : "lost", delivered, score, practice, targetPractice,
+      runTime: runState.runTime, sealCount: runState.sealCount,
+      hits: runState.runStats.hits, cleanThrows: runState.runStats.cleanThrows,
+      splits, seals: runState.seals.map(seal => ({ ...seal })),
+      historyMode: runState.testRun === true ? "test" : practice ? "practice" : "normal",
+      // Candidates express eligibility; storage decides whether a record improves and can be saved.
+      records: { score: practice ? null : score, time: won && !practice ? runState.runTime : null,
+        deliveryTime: delivered ? runState.runTime : null },
+      newBest: !practice && score > runState.best && score !== 0,
+      message: computeResultMessage({ won, reason, practice, sealCount: runState.sealCount, targetPractice })
+    };
+  }
+
+  function persistRunResult(result) {
+    if (result.records.score !== null) saveBest(result.records.score);
     let timeRecord = false;
     let deliveryRecord = false;
-    if (won && !targetPractice) splitTimes.push({ name: "Fener iskelesi", at: runTime });
-    VoyageLog.record({ mode: options.testRun === true ? "test" : practiceIndex < 0 ? "normal" : "practice",
-      won, seals: sealCount, score, time: runTime, hits: runStats.hits, cleanThrows: runStats.cleanThrows,
-      splits: splitTimes.map(split => split.at), reason });
-    if (won && practiceIndex < 0) {
+    VoyageLog.record({ mode: result.historyMode, won: result.won, seals: result.sealCount,
+      score: result.score, time: result.runTime, hits: result.hits, cleanThrows: result.cleanThrows,
+      splits: result.splits.map(split => split.at), reason: result.reason });
+    if (result.records.time !== null) {
       try {
-        const result = saveBestRunTime(localStorage, runTime);
-        bestTime = result.bestTime;
-        timeRecord = result.improved;
-        if (sealCount === 3) {
-          const delivery = saveBestRunTime(localStorage, runTime, DELIVERY_TIME_KEY);
+        const time = saveBestRunTime(localStorage, result.records.time);
+        bestTime = time.bestTime;
+        timeRecord = time.improved;
+        if (result.records.deliveryTime !== null) {
+          const delivery = saveBestRunTime(localStorage, result.records.deliveryTime, DELIVERY_TIME_KEY);
           bestDeliveryTime = delivery.bestTime;
           deliveryRecord = delivery.improved;
         }
       } catch { /* Record persistence is optional. */ }
     }
-    ui.finalTime.textContent = formatRunTime(runTime);
-    ui.bestTimeStart.textContent = formatRunTime(bestTime);
-    ui.bestTimeResult.textContent = formatRunTime(bestTime);
-    ui.newTimeBest.hidden = !timeRecord;
-    ui.deliveryTimeStart.textContent = formatRunTime(bestDeliveryTime);
-    ui.deliveryTimeResult.textContent = formatRunTime(bestDeliveryTime);
-    ui.newDeliveryBest.hidden = !deliveryRecord;
-    renderSealMarks(ui.resultSealMarks, true);
+    return { best, bestTime, bestDeliveryTime, timeRecord, deliveryRecord };
+  }
+
+  function renderResultSplits(result) {
     let previousSplit = 0;
-    ui.splits.innerHTML = splitTimes.map(split => {
+    ui.splits.innerHTML = result.splits.map(split => {
       const displayedSplit = Math.floor(split.at * 100 + 1e-9);
       const duration = (displayedSplit - previousSplit) / 100;
       previousSplit = displayedSplit;
       return `<li><span>${split.name}</span><b>${formatRunTime(split.at)}</b><small>+${formatRunTime(duration)}</small></li>`;
     }).join("");
-    ui.splits.hidden = splitTimes.length === 0;
-    ui.bestResult.textContent = formatScore(best);
-    ui.bestStart.textContent = formatScore(best);
-    ui.newBest.hidden = practiceIndex >= 0 || score <= previousBest || score === 0;
+    ui.splits.hidden = result.splits.length === 0 || Boolean(result.targetPractice);
+  }
+
+  function renderResultPracticeControls(result) {
+    document.querySelector("#result-practice").hidden = result.practice || result.seals.every(seal => seal.collected);
+    document.querySelector("#normal-shift-button").hidden = !result.targetPractice;
+    document.querySelector("#replay-button").textContent = result.targetPractice ? "Atışı yeniden dene ↗" : "Yeniden oyna ↗";
+    for (const button of document.querySelectorAll("#result-practice [data-seal-practice]")) {
+      button.hidden = result.seals.find(seal => seal.id === Number(button.dataset.sealPractice))?.collected !== false;
+    }
+  }
+
+  function renderRunResult(result, records) {
+    ui.resultScoreLabel.textContent = result.practice ? "BU ANTRENMAN" : "BU VARDİYA";
+    ui.finalScore.textContent = formatScore(result.score);
+    ui.finalSeals.textContent = `${result.sealCount}/3`;
+    ui.finalHits.textContent = String(result.hits);
+    ui.finalThrows.textContent = String(result.cleanThrows);
+    ui.finalTime.textContent = formatRunTime(result.runTime);
+    ui.bestTimeStart.textContent = formatRunTime(records.bestTime);
+    ui.bestTimeResult.textContent = formatRunTime(records.bestTime);
+    ui.newTimeBest.hidden = !records.timeRecord;
+    ui.deliveryTimeStart.textContent = formatRunTime(records.bestDeliveryTime);
+    ui.deliveryTimeResult.textContent = formatRunTime(records.bestDeliveryTime);
+    ui.newDeliveryBest.hidden = !records.deliveryRecord;
+    renderSealMarks(ui.resultSealMarks, true);
+    renderResultSplits(result);
+    ui.bestResult.textContent = formatScore(records.best);
+    ui.bestStart.textContent = formatScore(records.best);
+    ui.newBest.hidden = !result.newBest;
+    ui.resultKicker.textContent = result.message.kicker;
+    ui.resultTitle.textContent = result.message.title;
+    ui.resultCopy.textContent = result.message.copy;
+    renderResultPracticeControls(result);
+  }
+
+  function playResultSound(won) {
     if (won) {
-      ui.resultKicker.textContent = practiceIndex >= 0 ? "ANTRENMAN TAMAM" : sealCount === 3 ? "TESLİMAT TAMAM" : "FENERE VARDIN";
-      ui.resultTitle.textContent = practiceIndex >= 0 ? "Parkuru geçtin." : "Fener sönmeden yetiştin.";
-      ui.resultCopy.textContent = practiceIndex >= 0
-        ? "Hazırsan vardiyada süreye karşı deneyebilirsin."
-        : sealCount === 3
-          ? "Üç mührü de teslim ettin. Bu gecelik işin bitti."
-          : `${sealCount}/3 mühür topladın. Tam teslimat için yeni vardiyada eksik mühürlerin rotasını dene.`;
       playTone(740, 0.15, "triangle");
       playTone(980, 0.22, "sine", 0.13);
     } else {
-      ui.resultKicker.textContent = "VARDİYA BİTTİ";
-      ui.resultTitle.textContent = "Bu gece olmadı.";
-      ui.resultCopy.textContent = reason === "timeout"
-        ? "Vardiya süresi doldu. İskelelere daha kısa yoldan ulaşmayı deneyebilirsin."
-        : "Canların bitti. Zorlandığın kısmı antrenmanda yeniden deneyebilirsin.";
       playTone(190, 0.3, "sawtooth");
     }
-    if (targetPractice && won) {
-      ui.resultKicker.textContent = "MÜHÜR ANTRENMANI TAMAM";
-      ui.resultTitle.textContent = `${targetPractice.id}. mührü aldın.`;
-      ui.resultCopy.textContent = "Aynı atışı tekrar çalışabilir veya normal vardiyada deneyebilirsin.";
-      ui.splits.hidden = true;
-    } else if (targetPractice) {
-      ui.resultKicker.textContent = "MÜHÜR ANTRENMANI";
-      ui.resultTitle.textContent = "Mühür geride kaldı.";
-      ui.resultCopy.textContent = "R veya Yeniden oyna ile aynı atışı tekrar dene. Normal vardiya kayıtların etkilenmez.";
-      ui.splits.hidden = true;
-    }
-    document.querySelector("#result-practice").hidden = practiceIndex >= 0 || seals.every(seal => seal.collected);
-    document.querySelector("#normal-shift-button").hidden = !targetPractice;
-    document.querySelector("#replay-button").textContent = targetPractice ? "Atışı yeniden dene ↗" : "Yeniden oyna ↗";
-    for (const button of document.querySelectorAll("#result-practice [data-seal-practice]")) {
-      button.hidden = seals.find(seal => seal.id === Number(button.dataset.sealPractice))?.collected !== false;
-    }
+  }
+
+  function finishRun(won, reason = null) {
+    if (state !== "playing") return;
+    const result = computeResult({ won, reason, practiceIndex, score, remaining, sealCount, runTime,
+      runStats, splitTimes, seals, targetPractice, best, testRun: options.testRun });
+    releaseTether({ award: false, consumeAnchor: false });
+    boostTime = 0;
+    state = result.state;
+    delivered = result.delivered;
+    score = result.score;
+    splitTimes = result.splits;
+    if (result.won) motionEvent("finish");
+    const records = persistRunResult(result);
+    renderRunResult(result, records);
+    playResultSound(result.won);
     setPanels();
   }
 
