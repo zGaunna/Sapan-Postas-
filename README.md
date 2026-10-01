@@ -74,7 +74,7 @@ Projenin GitHub deposu: [zGaunna/Sapan-Postas-](https://github.com/zGaunna/Sapan
 
 Oyun Vanilla JavaScript ve Canvas kullanır; paket kurulumu veya derleme gerekmez. Node.js kuruluysa proje klasöründe şu kontrolleri çalıştırabilirsin:
 
-`npm test` aşağıdaki sözdizimi kontrolünü ve 15 kontrolü sırayla çalıştırır; ayrıca `level-data.js` sözdizimini denetler. Paket kurulumu gerekmez. Çalıştırıcı, OneDrive yollarındaki Node `EPERM` hatasını önlemek için `--preserve-symlinks` ve `--preserve-symlinks-main` kullanır.
+`npm test` aşağıdaki kontrolleri sırayla çalıştırır; ayrıca `level-data.js` ve `game-start.js` sözdizimini denetler. Paket kurulumu gerekmez. Çalıştırıcı, OneDrive yollarındaki Node `EPERM` hatasını önlemek için `--preserve-symlinks` ve `--preserve-symlinks-main` kullanır.
 
 ```sh
 node --check game.js
@@ -93,6 +93,7 @@ node work/check-target-practice.cjs
 node work/check-log.cjs
 node work/check-progression.cjs
 node work/check-result.cjs
+node work/check-state-machine.cjs
 ```
 
 İlk test; antrenman modlarını, yeniden denemeyi, süreyi, özel halkaları, rekor ayrımını, bozuk/engellenmiş depolamayı, iskele sürelerini, güvenli kurtarmayı ve uçuş önizlemesinin gerçek oyun fiziğiyle eşleşmesini kontrol eder. Parkur testi, aynı girdilerle tekrarlanabilir bir kontrol stratejisinin vardiyayı bitirdiğini doğrular. Kare döngüsü testi, kaydedilen bütün parkur girdilerini 30/60/120/144/180 Hz çizim döngülerinde oynatıp konum, süre, iskele geçişleri ve düşüşlerin birebir eşleştiğini kontrol eder.
@@ -100,6 +101,8 @@ node work/check-result.cjs
 `level-data.js`, 27 halkanın yükseklik dizisini, başlangıç konumunu, aralığını ve kırılgan/motorlu halka kimliklerini içerir; `game.js` öncesinde klasik script olarak yüklenir. Seviye tanımları dondurulmuştur; ziyaret ve aşınma durumu oyundaki ayrı kopyalarda tutulur. `game.js` açık `SapanGame.create(options)` arayüzünü tanımlar; klasik `game-start.js` scripti seçenek vermeden oyunu başlatır. Test donanımı `{ debug: true, testRun: true, beforeStep }` seçenekleriyle aynı oyunu oluşturur; dönen test API'si kontrollü adımlama ve durum okumayı sağlar. Kaynak metni yamalanmaz; normal açılış test API'si döndürmez. Üretim kodu `globalThis.__playtestRun` okumaz.
 
 `finishRun()` sonuç hesabını saf `computeResult(runState)` fonksiyonuna, depolamayı `persistRunResult(result)` fonksiyonuna ve sonuç ekranını `renderRunResult(result, records)` fonksiyonuna ayırır. Hesap girdisini veya canlı oyun durumunu değiştirmez; puanı, sonuç metnini, iskele sürelerini ve kayıt adaylarını döndürür. Antrenmanda hiçbir rekor adayı yoktur; normal kayıp skor rekoruna, normal kazanım fener süresine, 3/3 mühürlü normal kazanım teslimat süresine adaydır. `check-result` kazanma/kaybetme, süre dolması, 0–3 mühür, antrenman ve hedef mühür ayrımını; girdi değişmezliğini ve DOM/depolamadan bağımsızlığı doğrular.
+
+Oyun sekiz durum nesnesiyle yönetilir: `menu`, `playing`, `exploring`, `paused`, `map`, `history`, `won`, `lost`. Her durumun `enter/update/draw/exit` yaşam döngüsü vardır; geçişler önce çıkışı, sonra yeni durumun girişini çağırır. Kare döngüsü aktif durumun sabit adım ve görsel zaman kararını kullanır. Harita, defter ve duraklatma dönüş noktalarını durum nesnesi olarak saklar; çıkışlar basılı girdiyi veya saklanan uçuşu temizlemez. `check-state-machine` yaşam döngüsü sırasını, aynı duruma yeniden girişi, geçersiz hedef reddini, dönüş ekranlarını, saatleri ve Web Audio başlangıcını doğrular.
 
 Teslimat testi aynı tekrar kontrolünü 3/3 mühürlü gerçek koşuda yapar; makara atışında en az 0,25 saniyelik farklı bırakışları, birkaç ip uzunluğunu ve üç hedef atışında 0–4 fizik adımı gecikmenin 125 birleşimini doğrular. Ayrıca mühür bildirimi/kurtarma kurallarını ve iki süre kaydının ayrılığını kontrol eder. İnsan oyuncunun zorluğu bu otomatik testlerle ölçülmez.
 

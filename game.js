@@ -86,7 +86,10 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   const states = Object.freeze({
     menu: Object.freeze({
       id: "menu",
-      enter(context) { if (context.kind === "menu" || context.kind === "startup") setPanels(); },
+      enter(context) {
+        if (context.kind === "menu" || context.kind === "startup") setPanels();
+        else enterRestoredState(context);
+      },
       update: updateIdleVisuals,
       draw: drawMenuWorld,
       animate: true,
@@ -121,16 +124,12 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
       id: "won", enter: enterWon, update: updateIdleVisuals, draw: drawRouteWorld,
       animate: true, canStep: () => false, exit() {}
     }),
-    lost: pendingState("lost")
+    lost: Object.freeze({
+      id: "lost", enter: enterLost, update: updateIdleVisuals, draw: drawRouteWorld,
+      animate: true, canStep: () => false, exit() {}
+    })
   });
   const machine = createStateMachine(states, states.menu);
-
-  function pendingState(id) {
-    const animate = !["paused", "map", "history"].includes(id);
-    return Object.freeze({ id, animate, canStep: () => id === "exploring", enter() {},
-      update(dt, phase) { if (phase === "fixed") updateSocial(dt); else if (animate) updateIdleVisuals(dt); },
-      draw: drawLegacyWorld, exit() {} });
-  }
 
   function createStateMachine(definitions, initial) {
     let current = initial;
@@ -140,6 +139,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
       in: targets => targets.includes(current),
       transition(next, context = {}) {
         if (!Object.values(definitions).includes(next)) throw new Error("Unknown game state");
+        // Exits retain held input and saved flight; entry actions choose what to reset or restore.
         current.exit(context);
         current = next;
         current.enter(context);
@@ -410,7 +410,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   }
 
   function enterPlaying(context) {
-    if (context.kind !== "reset") return;
+    if (context.kind !== "reset") { enterRestoredState(context); return; }
     effects.reset(); effects.reduced = motionReduced; ropePulse = 0;
     syncVisualPosition(); courier.reset(poseInput());
     resetFrameClock();
@@ -451,7 +451,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   function pauseGame() {
     if (!machine.is(states.playing) && !machine.is(states.exploring)) return;
     pauseOrigin = machine.current;
-    machine.transition(states.paused, { kind: "legacy" });
+    machine.transition(states.paused, { kind: "pause" });
   }
 
   function enterPaused() {
@@ -461,9 +461,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
 
   function resumeGame() {
     if (!machine.is(states.paused)) return;
-    machine.transition(pauseOrigin, { kind: "legacy" });
-    resetFrameClock();
-    setPanels();
+    machine.transition(pauseOrigin, { kind: "resume" });
   }
 
   function computeResultMessage({ won, reason, practice, sealCount, targetPractice }) {
@@ -592,16 +590,26 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
       runStats, splitTimes, seals, targetPractice, best, testRun: options.testRun });
     releaseTether({ award: false, consumeAnchor: false });
     boostTime = 0;
-    if (result.won) {
-      machine.transition(states.won, { kind: "finish", result });
-      return;
-    }
-    machine.transition(states.lost, { kind: "legacy" });
-    applyFinishedResult(result);
+    machine.transition(result.won ? states.won : states.lost, { kind: "finish", result });
   }
 
   function enterWon(context) {
     if (context.kind === "finish") applyFinishedResult(context.result);
+    else enterRestoredState(context);
+  }
+
+  function enterLost(context) {
+    if (context.kind === "finish") applyFinishedResult(context.result);
+    else enterRestoredState(context);
+  }
+
+  function enterRestoredState(context) {
+    if (context.kind === "resume" || context.kind === "overlay-close") {
+      resetFrameClock(); setPanels();
+    } else if (context.kind === "harbor-return") {
+      savedFlight = null;
+      courier.reset(poseInput()); resetFrameClock(); setPanels(); updateHud(true);
+    }
   }
 
   function applyFinishedResult(result) {
@@ -639,7 +647,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   }
 
   function enterExploring(context) {
-    if (context.kind !== "harbor") return;
+    if (context.kind !== "harbor") { enterRestoredState(context); return; }
     const dock = socialDock;
     keys.clear(); recoveryBlockedKeys.clear();
     player.x = dock.id === "rihtim" ? 170 : dock.x - 120;
@@ -658,10 +666,8 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
       ropeLength = savedFlight.tether.length; ropeLengthRate = savedFlight.tether.rate;
       tetherTime = savedFlight.tether.time; fragileWarningPlayed = savedFlight.tether.warning;
       recoveryBlockedKeys.clear(); for (const key of savedFlight.blockedKeys) recoveryBlockedKeys.add(key);
-      machine.transition(states.playing, { kind: "legacy" });
-    } else machine.transition(socialOrigin, { kind: "legacy" });
-    savedFlight = null;
-    courier.reset(poseInput()); resetFrameClock(); setPanels(); updateHud(true);
+      machine.transition(states.playing, { kind: "harbor-return" });
+    } else machine.transition(socialOrigin, { kind: "harbor-return" });
   }
 
   function updateSocialHud() {
@@ -735,10 +741,10 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   function closeConversation() { conversation = null; keys.clear(); setPanels(); updateSocialHud(); }
 
   function toggleMap() {
-    if (machine.is(states.map)) { machine.transition(mapOrigin, { kind: "legacy" }); resetFrameClock(); setPanels(); return; }
+    if (machine.is(states.map)) { machine.transition(mapOrigin, { kind: "overlay-close" }); return; }
     if (!machine.in([states.playing, states.exploring, states.menu])) return;
     mapOrigin = machine.current;
-    machine.transition(states.map, { kind: "legacy" });
+    machine.transition(states.map, { kind: "map-open" });
   }
 
   function enterMap() {
@@ -750,10 +756,10 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   }
 
   function toggleLog() {
-    if (machine.is(states.history)) { machine.transition(logOrigin, { kind: "legacy" }); resetFrameClock(); setPanels(); return; }
+    if (machine.is(states.history)) { machine.transition(logOrigin, { kind: "overlay-close" }); return; }
     if (!machine.in([states.menu, states.won, states.lost, states.playing, states.exploring])) return;
     logOrigin = machine.current;
-    machine.transition(states.history, { kind: "legacy" });
+    machine.transition(states.history, { kind: "history-open" });
   }
 
   function enterHistory() {
@@ -770,7 +776,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
 
   function travelToDock(id) {
     if (!HarborWorld.docks.some(dock => dock.id === id)) return false;
-    if (machine.is(states.map)) { machine.transition(mapOrigin, { kind: "legacy" }); }
+    if (machine.is(states.map)) { machine.transition(mapOrigin, { kind: "travel" }); }
     return enterHarbor(id);
   }
 
@@ -1661,12 +1667,6 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
         ctx.beginPath(); ctx.moveTo(pos.x - viewX - 8, 79); ctx.lineTo(pos.x - viewX + 8, 79); ctx.lineTo(pos.x - viewX, 92); ctx.closePath(); ctx.fill();
       }
     }
-  }
-
-  function drawLegacyWorld(time) {
-    if (socialVisible()) drawSocialWorld(time);
-    else if (!machine.is(states.menu) && !(machine.is(states.map) && mapOrigin === states.menu) && !(machine.is(states.history) && logOrigin === states.menu)) drawRouteWorld(time);
-    else drawMenuWorld();
   }
 
   function drawOriginWorld(origin, time) {
