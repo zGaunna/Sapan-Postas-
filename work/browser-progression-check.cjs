@@ -27,7 +27,7 @@ const out=path.join(__dirname,'evidence'); fs.mkdirSync(out,{recursive:true});
 
     await page.goto(url + '/work/browser-playtest.html');
     const lengths=await page.evaluate(()=>{
-      const g=window.__playtest; window.__playtestRun=false;
+      const g=window.__playtest; window.__gameOptions.testRun=false;
       g.resetRun(-1); g.player.x=17401; g.update(1/120);
       const first=VoyageLog.list().length;
       g.update(1/120); const duplicate=VoyageLog.list().length;

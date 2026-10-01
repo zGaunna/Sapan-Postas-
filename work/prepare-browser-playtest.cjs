@@ -14,7 +14,7 @@ const testSource = source.replace("update(PHYSICS_DT);",
     startSealPractice, restartCurrentRun, targetPractice: () => targetPractice, toggleLog,
     setCamera: x => { cameraX = x; syncVisualPosition(); }
   };
-})();`);
+})(globalThis.__gameOptions);`);
 if (source === testSource) throw new Error("Playtest instrumentation failed");
 let html = fs.readFileSync(path.join(root, "index.html"), "utf8");
 html = html.replace("<head>", `<head><base href="/">
@@ -27,7 +27,7 @@ html = html.replace("<head>", `<head><base href="/">
     }});
     window.__nativeRAF = window.requestAnimationFrame.bind(window);
     window.requestAnimationFrame = () => 0;
-    window.__playtestRun = true;
+    window.__gameOptions = { testRun: true };
   </script>`).replace('src="game.js"', 'src="/work/browser-playtest.js"');
 fs.writeFileSync(path.join(__dirname, "browser-playtest.js"), testSource);
 fs.writeFileSync(path.join(__dirname, "browser-playtest.html"), html);

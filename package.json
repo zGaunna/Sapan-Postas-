@@ -1,0 +1,7 @@
+{
+  "name": "sapan-postasi",
+  "private": true,
+  "scripts": {
+    "test": "node --preserve-symlinks --preserve-symlinks-main work/run-tests.cjs"
+  }
+}

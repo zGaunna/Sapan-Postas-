@@ -1,6 +1,7 @@
-(() => {
+((gameOptions) => {
   "use strict";
 
+  const options = gameOptions ?? {};
   const W = 1280;
   const H = 720;
   const ROUTE_END = 17400;
@@ -52,12 +53,8 @@
     previewButton: document.querySelector("#preview-toggle")
   };
 
-  const anchorHeights = [305, 265, 370, 295, 405, 300, 345, 250, 390, 310, 420, 285, 360];
-  const fragileAnchorIds = new Set([6, 10, 18]);
-  const winchAnchorIds = new Set([13, 24]);
-  const anchors = Array.from({ length: 27 }, (_, i) => ({
-    id: i, x: 440 + i * 650, y: anchorHeights[i % anchorHeights.length],
-    type: fragileAnchorIds.has(i) ? "fragile" : winchAnchorIds.has(i) ? "winch" : "normal",
+  const anchors = LevelData.anchors.map(anchor => ({
+    ...anchor,
     visited: false, fragileElapsed: 0
   }));
   const seals = [
@@ -413,7 +410,7 @@
     let timeRecord = false;
     let deliveryRecord = false;
     if (won && !targetPractice) splitTimes.push({ name: "Fener iskelesi", at: runTime });
-    VoyageLog.record({ mode: globalThis.__playtestRun ? "test" : practiceIndex < 0 ? "normal" : "practice",
+    VoyageLog.record({ mode: options.testRun === true ? "test" : practiceIndex < 0 ? "normal" : "practice",
       won, seals: sealCount, score, time: runTime, hits: runStats.hits, cleanThrows: runStats.cleanThrows,
       splits: splitTimes.map(split => split.at), reason });
     if (won && practiceIndex < 0) {

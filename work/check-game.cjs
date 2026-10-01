@@ -38,7 +38,7 @@ const source = original.replace("update(PHYSICS_DT);", "if (globalThis.__beforeF
     startSealPractice, restartCurrentRun, targetPractice: () => targetPractice,
     toggleLog,
   };
-})();`);
+})(globalThis.__gameOptions);`);
 assert.notEqual(source, original, "Test instrumentation must be inserted into the game closure");
 
 const nodes = new Map();
@@ -84,7 +84,7 @@ function dispatchKeyUp(code) {
 }
 const storage = new Map([["sapan-postasi-best", "123"], ["sapan-postasi-tutorial", "done"]]);
 const context = {
-  __playtestRun: true,
+  __gameOptions: { testRun: true },
   document: {
     querySelector: selector => element(selector),
     querySelectorAll: selector => selector === "[data-practice-start]" ? practiceButtons : [],
@@ -104,13 +104,27 @@ const context = {
   requestAnimationFrame() {},
 };
 vm.createContext(context);
-for (const name of ["courier.js", "motion.js", "harbor-world.js", "harbor-social.js", "voyage-log.js"]) {
+for (const name of ["courier.js", "motion.js", "harbor-world.js", "harbor-social.js", "voyage-log.js", "level-data.js"]) {
   vm.runInContext(fs.readFileSync(path.join(__dirname, "..", name), "utf8"), context, { filename: name });
 }
 vm.runInContext(source, context, { filename: gamePath });
 const game = context.__gameDebug;
 
 assert.equal(game.anchors.length, 27);
+const expectedHeights = [305, 265, 370, 295, 405, 300, 345, 250, 390, 310, 420, 285, 360];
+assert.deepEqual(Array.from(game.anchors, ({ id, x, y, type }) => ({ id, x, y, type })),
+  Array.from({ length: 27 }, (_, id) => ({ id, x: 440 + id * 650,
+    y: expectedHeights[id % expectedHeights.length],
+    type: [6, 10, 18].includes(id) ? "fragile" : [13, 24].includes(id) ? "winch" : "normal" })));
+assert.ok(html.indexOf('src="level-data.js"') < html.indexOf('src="game.js"'));
+assert.ok(Object.isFrozen(context.LevelData));
+for (const key of ["anchorHeights", "fragileAnchorIds", "winchAnchorIds", "anchors"]) {
+  assert.ok(Object.isFrozen(context.LevelData[key]));
+}
+for (const anchor of context.LevelData.anchors) {
+  assert.ok(Object.isFrozen(anchor));
+  assert.notEqual(game.anchors[anchor.id], anchor, "Runtime wear must not mutate level definitions");
+}
 assert.deepEqual(Array.from(game.anchors.slice(0, 6), anchor => anchor.type), Array(6).fill("normal"));
 assert.equal(game.anchors[6].type, "fragile");
 assert.equal(game.anchors[13].type, "winch");

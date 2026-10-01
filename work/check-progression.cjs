@@ -2,7 +2,9 @@ const assert = require('node:assert/strict');
 const { game, context, element, dispatchKeyUp } = require('./check-game.cjs');
 const log = context.VoyageLog;
 assert.equal(log.list().length,0,'Automated normal routes must be excluded');
-context.__playtestRun = false;
+context.__gameOptions.testRun = false;
+// The retired global must not suppress real-player history.
+context.__playtestRun = true;
 game.resetRun(-1); game.update(.1); game.finishRun(true);
 assert.equal(log.list().length,1);
 assert.equal(log.list()[0].won,true);
@@ -19,7 +21,8 @@ assert.equal(log.list().length,1,'Both training modes must stay out of the log')
 game.resetRun(-1); game.update(.2); game.finishRun(false,'timeout');
 assert.equal(log.list().length,2);
 assert.equal(log.list()[0].reason,'timeout');
-context.__playtestRun = true;
+context.__gameOptions.testRun = true;
+delete context.__playtestRun;
 game.resetRun(-1); game.finishRun(true);
 assert.equal(log.list().length,2,'Explicit test runs must stay out of the log');
 
@@ -45,4 +48,18 @@ element('#sound-toggle').click();
 assert.equal(context.localStorage.getItem('sapan-postasi-sound'),'on');
 element('#motion-toggle').click();
 assert.equal(context.localStorage.getItem('sapan-postasi-motion'),'reduced');
+// Production startup omits the injected options, even if test globals exist.
+const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
+const production = fs.readFileSync(path.join(__dirname, '..', 'game.js'), 'utf8');
+assert.equal(production.includes('__playtestRun'), false);
+const defaultSource = production.replace(/\}\)\(\);\s*$/, `
+  globalThis.__defaultGame = { resetRun, finishRun };
+})();`);
+context.__playtestRun = true;
+vm.runInContext(defaultSource, context);
+context.__defaultGame.resetRun(-1);
+context.__defaultGame.finishRun(true);
+assert.equal(log.list().length, 3, 'Default production startup must record normal runs');
+delete context.__playtestRun;
+delete context.__defaultGame;
 console.log('Progression checks passed: normal-only history integration, single recording, overlays freeze, safe held-key release, invalid travel, preserved conversation and saved preferences.');
