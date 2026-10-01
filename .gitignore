@@ -11,3 +11,6 @@ work/evidence/
 *.log
 Thumbs.db
 .DS_Store
+
+# Development dependencies remain outside the offline game.
+node_modules/

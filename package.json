@@ -2,6 +2,17 @@
   "name": "sapan-postasi",
   "private": true,
   "scripts": {
-    "test": "node --preserve-symlinks --preserve-symlinks-main work/run-tests.cjs"
+    "test": "node --preserve-symlinks --preserve-symlinks-main work/run-tests.cjs",
+    "test:browser": "node --preserve-symlinks --preserve-symlinks-main work/run-browser-tests.cjs",
+    "lint": "node --preserve-symlinks --preserve-symlinks-main node_modules/eslint/bin/eslint.js .",
+    "typecheck": "node --preserve-symlinks --preserve-symlinks-main node_modules/typescript/bin/tsc --project tsconfig.json"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@stylistic/eslint-plugin": "5.10.0",
+    "eslint": "10.11.0",
+    "globals": "17.12.0",
+    "playwright": "1.63.0",
+    "typescript": "7.0.2"
   }
 }

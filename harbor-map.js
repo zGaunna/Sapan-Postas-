@@ -1,3 +1,4 @@
+// @ts-check
 (() => {
   "use strict";
 
@@ -13,24 +14,32 @@
   const checkpoints = Object.freeze(districts.slice(1).map(district => district.start));
   const practiceStarts = Object.freeze(districts.map(district => district.practiceX));
 
+  /** @param {number} x */
   function districtAt(x) {
     if (!Number.isFinite(x)) return null;
     const clamped = Math.max(0, Math.min(end, x));
     return districts.find((district, index) => clamped < district.end || index === districts.length - 1);
   }
 
+  /** @param {number} id */
   function practiceForSeal(id) {
     return Number.isInteger(id) && id >= 1 && id <= 3 ? id - 1 : null;
   }
 
+  /**
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {SceneryOptions} options
+   */
   function drawScenery(ctx, options = {}) {
     const { cameraX, width = 1280, height = 720, time = 0, motion = true } = options;
-    if (!Number.isFinite(cameraX) || !Number.isFinite(width) || width <= 0 ||
+    if (typeof cameraX !== "number" || !Number.isFinite(cameraX) || !Number.isFinite(width) || width <= 0 ||
         !Number.isFinite(height) || height <= 0) return;
     const left = Math.max(0, cameraX);
     const right = Math.min(end, cameraX + width);
     if (left >= right) return;
+    /** @param {number} x */
     const screen = x => x - cameraX;
+    /** @param {number} x */
     const inView = (x, radius = 0) => x + radius >= left && x - radius <= right;
 
     ctx.save();

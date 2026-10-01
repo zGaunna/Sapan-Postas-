@@ -1,10 +1,11 @@
 const assert = require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path');
 const {chromium}=require(process.argv[2]||'playwright');
+const {launchBrave}=require('./browser-launch.cjs');
 const url = process.env.GAME_URL || 'http://127.0.0.1:8765';
 const out=path.join(__dirname,'evidence'); fs.mkdirSync(out,{recursive:true});
 (async()=>{
-  const browser=await chromium.launch({headless:true});
+  const browser=await launchBrave(chromium);
   const context=await browser.newContext({viewport:{width:1280,height:900}});
   const page=await context.newPage(),errors=[];
   page.on('pageerror',e=>errors.push(e.message));

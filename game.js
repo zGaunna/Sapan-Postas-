@@ -260,7 +260,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   try { bestTime = readBestRunTime(localStorage); } catch { /* Storage can be blocked. */ }
   try { bestDeliveryTime = readBestRunTime(localStorage, DELIVERY_TIME_KEY); } catch { /* Storage can be blocked. */ }
 
-  // Süre yardımcıları Sonnet 5.5 ile hazırlandı; depolama hataları oyunu durdurmaz.
+  // Storage failures must not prevent timing or finishing a run.
   function formatRunTime(seconds) {
     if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0) return "—";
     const total = Math.floor(seconds * 100 + 1e-9);
@@ -1535,7 +1535,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     ctx.restore();
   }
 
-  // Sonnet 5.5 ile hazırlanan saf uçuş tahmini; gerçek hareketle regresyon testi yapılır.
+  // Predict with the same fixed step as live physics so the guide matches the flight.
   function predictReleasePath(snapshot) {
     const BOOST_VX_MAX = SLING.vxCap;
     const BOOST_DURATION = SLING.seconds;
@@ -1730,7 +1730,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     } catch { /* Sound is optional and may be unavailable in some browsers. */ }
   }
 
-  // Sonnet 5.5 ile hazırlanan döngü: çizim hızı, halat fiziğinin adımını değiştirmez.
+  // Fixed simulation steps keep rope physics independent of rendering frequency.
   function resetFrameClock() {
     lastFrame = 0;
     frameAccumulator = 0;

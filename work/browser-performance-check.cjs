@@ -1,8 +1,9 @@
 const fs=require('node:fs'),path=require('node:path');
 const {chromium}=require(process.argv[2]||'playwright');
+const {launchBrave}=require('./browser-launch.cjs');
 const url = process.env.GAME_URL || 'http://127.0.0.1:8765';
 (async()=>{
-  const browser=await chromium.launch({headless:true});
+  const browser=await launchBrave(chromium);
   try {
     const page=await browser.newPage({viewport:{width:1920,height:1080}});
     await page.goto(url + '/work/browser-playtest.html');

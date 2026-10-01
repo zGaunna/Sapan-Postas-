@@ -2,9 +2,10 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { chromium } = require(process.argv[2] || "playwright");
+const { launchBrave } = require("./browser-launch.cjs");
 (async () => {
   const output = path.join(__dirname, "evidence"); fs.mkdirSync(output, { recursive: true });
-  const browser = await chromium.launch({ headless: true });
+  const browser = await launchBrave(chromium);
   const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } });
   const page = await context.newPage(); const errors = [];
   page.on("pageerror", error => errors.push(error.message));
