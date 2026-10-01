@@ -112,7 +112,11 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
       draw(time) { drawOriginWorld(mapOrigin, time); },
       animate: false, canStep: () => false, exit() {}
     }),
-    history: pendingState("history"),
+    history: Object.freeze({
+      id: "history", enter: enterHistory, update() {},
+      draw(time) { drawOriginWorld(logOrigin, time); },
+      animate: false, canStep: () => false, exit() {}
+    }),
     won: pendingState("won"),
     lost: pendingState("lost")
   });
@@ -733,7 +737,12 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   function toggleLog() {
     if (machine.is(states.history)) { machine.transition(logOrigin, { kind: "legacy" }); resetFrameClock(); setPanels(); return; }
     if (!machine.in([states.menu, states.won, states.lost, states.playing, states.exploring])) return;
-    logOrigin = machine.current; machine.transition(states.history, { kind: "legacy" }); keys.clear(); resetFrameClock(); setPanels();
+    logOrigin = machine.current;
+    machine.transition(states.history, { kind: "legacy" });
+  }
+
+  function enterHistory() {
+    keys.clear(); resetFrameClock(); setPanels();
     const runs = VoyageLog.list();
     document.querySelector("#log-empty").hidden = runs.length > 0;
     document.querySelector("#log-table").hidden = runs.length === 0;
