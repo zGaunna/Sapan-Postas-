@@ -102,7 +102,11 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
       draw(time) { drawOriginWorld(states.exploring, time); },
       animate: true, canStep: () => true, exit() {}
     }),
-    paused: pendingState("paused"),
+    paused: Object.freeze({
+      id: "paused", enter: enterPaused, update() {},
+      draw(time) { drawOriginWorld(pauseOrigin, time); },
+      animate: false, canStep: () => false, exit() {}
+    }),
     map: pendingState("map"),
     history: pendingState("history"),
     won: pendingState("won"),
@@ -437,6 +441,9 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     if (!machine.is(states.playing) && !machine.is(states.exploring)) return;
     pauseOrigin = machine.current;
     machine.transition(states.paused, { kind: "legacy" });
+  }
+
+  function enterPaused() {
     resetFrameClock();
     setPanels();
   }
