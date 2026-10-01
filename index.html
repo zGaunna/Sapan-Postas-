@@ -26,6 +26,7 @@
 
     <section class="game-frame" aria-label="Sapan Postası oyun alanı">
       <canvas id="game" aria-label="Gece limanında halatla halkalara tutunup ip uzunluğunu ayarlayarak ilerlediğin oyun alanı"></canvas>
+      <div id="perf-readout" class="perf-readout" hidden></div>
 
       <section id="hud" class="hud" hidden aria-live="polite">
         <div class="hud-left">
@@ -130,7 +131,7 @@
           <div class="result-stats"><span>Paket <b id="final-seals">0/3</b></span><span>En iyi <b id="best-result">0</b></span></div>
           <ol id="result-seal-marks" class="seal-marks result-seal-marks" aria-label="Teslim edilen mühürler"></ol>
           <div class="result-stats"><span>Temiz atış <b id="final-throws">0</b></span><span>Düşüş / çarpışma <b id="final-hits">0</b></span></div>
-          <div class="result-stats"><span>Süre <b id="final-time">0:00.00</b></span><span>Fener rekoru <b id="best-time-result">—</b></span></div>
+          <div class="result-stats"><span>Süre <b id="final-time">0:00.00</b><b id="final-time-count" aria-hidden="true" hidden></b></span><span>Fener rekoru <b id="best-time-result">—</b></span></div>
           <p id="new-time-best" class="time-record" hidden>YENİ SÜRE REKORU</p>
           <div class="result-stats"><span>Teslimat süresi</span><b id="delivery-time-result">—</b></div>
           <p id="new-delivery-best" class="time-record" hidden>YENİ TESLİMAT REKORU</p>

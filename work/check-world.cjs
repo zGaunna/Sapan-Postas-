@@ -5,10 +5,10 @@ const path = require("node:path");
 const vm = require("node:vm");
 const source = fs.readFileSync(path.join(__dirname, "..", "harbor-world.js"), "utf8");
 // Deliberately no document, window, game, storage, assets, or timers in this realm.
-const sandbox = {};
+const sandbox = { Path2D: require("./path2d-stub.cjs") };
 vm.runInNewContext(source, sandbox, { filename: "harbor-world.js", timeout: 1000 });
 const world = sandbox.HarborWorld;
-assert.deepEqual(Object.keys(world).sort(), ["districts", "docks", "districtAt", "drawBackground", "drawDock", "drawNPC", "drawMap"].sort());
+assert.deepEqual(Object.keys(world).sort(), ["districts", "docks", "districtAt", "drawBackground", "drawDock", "drawNPC", "drawMap", "drawGlow"].sort());
 const plain = value => JSON.parse(JSON.stringify(value));
 const expectedDistricts = [
   ["rihtim", 0, 3600], ["pazar", 3600, 5900], ["vinc", 5900, 11200],
@@ -41,12 +41,17 @@ for (const invalid of [NaN, Infinity, -Infinity, undefined, null, "3600", {}, 1n
 // balanced state. It also catches leaked paint/dash/transform state between calls.
 function canvas() {
   const calls = [], stack = [], state = { globalAlpha: .73, fillStyle: "sentinel", strokeStyle: "sentinel", lineWidth: 4,
-    lineJoin: "miter", lineCap: "butt", textAlign: "right", font: "13px serif", dash: [3, 2], transform: [1, 0, 0, 1, 12, 34] };
+    lineJoin: "miter", lineCap: "butt", textAlign: "right", font: "13px serif", globalCompositeOperation: "multiply", dash: [3, 2], transform: [1, 0, 0, 1, 12, 34] };
   const ctx = {};
   for (const key of Object.keys(state)) Object.defineProperty(ctx, key, {
     get: () => state[key], set: value => { if (typeof value === "number") assert(Number.isFinite(value), key); state[key] = value; }
   });
   const record = (method, args) => {
+    for (const value of args) if (value instanceof sandbox.Path2D) {
+      for (const command of value.commands) assert(command.slice(1).every(Number.isFinite), "Path2D has nonfinite geometry");
+      assert.equal(state.lineWidth, 1);
+      assert(["rgba(133,174,187,.13)", "rgba(160,188,198,.20)"].includes(state.strokeStyle));
+    }
     for (const value of args) if (typeof value === "number") assert(Number.isFinite(value), `${method} has nonfinite geometry`);
     calls.push([method, ...args]);
     assert(calls.length < 24000, "draw loop exceeds bounded viewport budget");
@@ -77,10 +82,23 @@ function canvas() {
 }
 const snapshot = JSON.stringify(plain([world.districts, world.docks]));
 function render(fn) { const c = canvas(); fn(c.ctx); c.check(); return c.calls; }
+render(ctx => world.drawGlow(ctx, 10, 20, 18, "rgba(85,214,207,.55)", true));
+for (const radius of [0, -1, Infinity, NaN, 257]) assert.equal(render(ctx => world.drawGlow(ctx, 0, 0, radius)).length, 0);
 let maxBackground = 0;
 const signatures = new Set();
 for (const focus of [1600, 4700, 8200, 13400, 16600]) {
   const calls = render(ctx => world.drawBackground(ctx, focus - 460, 12, focus));
+  const paths = calls.filter(call => call[0] === "stroke" && call[1] instanceof sandbox.Path2D);
+  assert.equal(paths.length, 2, "Water must use exactly two strokes");
+  const expected = [[], []];
+  const mod = (x, n) => ((x % n) + n) % n;
+  const noise = n => { const v = Math.sin(n * 127.1 + 311.7) * 43758.5453; return v - Math.floor(v); };
+  for (let row = 0; row < 9; row++) for (let i = 0; i < 29; i++) {
+    const y = 562 + row * 19;
+    const x = mod(i * 49 - (focus - 460) * (.35 + row * .02) + Math.sin(12 + row) * 7, 1350) - 35;
+    expected[row % 3 ? 0 : 1].push(["moveTo", x, y + Math.sin(12 * .9 + i + row) * 2], ["lineTo", x + 10 + noise(i + row) * 23, y]);
+  }
+  assert.deepEqual(paths.map(call => call[1].commands), expected, "All 261 segments must preserve the original coordinates and grouping");
   maxBackground = Math.max(maxBackground, calls.length);
   signatures.add(JSON.stringify(calls.filter(c => ["fillRect", "lineTo", "ellipse"].includes(c[0]))));
   assert(calls.some(c => c[0] === "fillRect" && c[1] === 0 && c[2] === 0 && c[3] === 1280 && c[4] === 720));

@@ -42,7 +42,7 @@ function runRoute({ reelTo, releaseOffset, start = -1, frameRate = 120, ringPoli
       ringSplits.push({ ring: game.tetherAnchor().id, at: +(steps * dt).toFixed(3) });
     }
     previousAnchor = game.tetherAnchor();
-    if (captureInputs) inputs.push({ keys: [...game.keys], action });
+    if (captureInputs) inputs.push({ keys: [...game.keys], action, visualRope: JSON.stringify(game.visualRope), squash: JSON.stringify(game.squash) });
     game.update(dt);
     if (observe) observe(game);
     farthest = Math.max(farthest, game.player.x);

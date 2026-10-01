@@ -1,10 +1,16 @@
-/* Sapan Postası: pure Canvas scenery, in a fixed 1280 x 720 logical viewport.
+/* Sapan Postası: Canvas scenery, in a fixed 1280 x 720 logical viewport.
  * Positions are world pixels; NPC y is their centre (feet at y + 28).
- * Nothing here creates collisions, reads storage, or advances game state. */
+ * Static images are cached per context; drawing never advances game state. */
 (function () {
   "use strict";
   const W = 1280, H = 720, END = 17400, TAU = Math.PI * 2;
   const INK = "#192d38", WARM = "#f2ca8b";
+  const PALETTE_STEPS = 32, SHORE_FACTOR = .22, SHORE_STEP = 290;
+  const SHORE_TILE_WIDTH = 2048, SHORE_TOP = 360, SHORE_HEIGHT = 180;
+  const MOON_RADIUS = 108;
+  const staticLayers = new WeakMap();
+  const glowCache = new Map();
+  const GLOW_CACHE_LIMIT = 32;
   const districts = Object.freeze([
     { id: "rihtim", name: "Eski Rıhtım", from: 0, to: 3600, color: "#d3a278",
       description: "Sıcak depo pencereleri, eski postahane ve ağlarını toplayan balıkçılar.",
@@ -46,12 +52,13 @@
     const channel = shift => Math.round(((aa >> shift) & 255) * (1 - t) + ((bb >> shift) & 255) * t);
     return `rgb(${channel(16)},${channel(8)},${channel(0)})`;
   }
-  function paletteAt(x) {
+  function paletteAt(x, quantized = false) {
     const d = districtAt(x) || districts[0], p = { ...d.palette };
     for (let i = 1; i < districts.length; i++) {
       const boundary = districts[i].from;
       if (Math.abs(x - boundary) <= 420) {
-        const t = smooth((x - boundary + 420) / 840);
+        let t = smooth((x - boundary + 420) / 840);
+        if (quantized) t = Math.round(t * PALETTE_STEPS) / PALETTE_STEPS;
         for (const key of Object.keys(p)) p[key] = blend(districts[i - 1].palette[key], districts[i].palette[key], t);
         break;
       }
@@ -77,9 +84,45 @@
     ctx.fillStyle = color; ctx.fillText(value, x, y);
   }
   function glow(ctx, x, y, radius, color = "rgba(248,198,119,.22)") {
-    const g = ctx.createRadialGradient(x, y, 0, x, y, radius);
-    g.addColorStop(0, color); g.addColorStop(1, "rgba(248,198,119,0)");
-    box(ctx, x - radius, y - radius, radius * 2, radius * 2, g);
+    drawGlow(ctx, x, y, radius, color);
+  }
+  function glowTint(color) {
+    const rgba = /^rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\s*\)$/.exec(color);
+    return rgba ? { color: `rgb(${rgba[1]},${rgba[2]},${rgba[3]})`, alpha: clamp(Number(rgba[4]), 0, 1) }
+      : { color, alpha: 1 };
+  }
+  function glowSprite(radius, color) {
+    if (!globalThis.document?.createElement) return null;
+    const key = `${radius}|${color}`;
+    let sprite = glowCache.get(key);
+    if (!sprite) {
+      const layer = makeLayer(Math.ceil(radius * 2), Math.ceil(radius * 2));
+      if (!layer) return null;
+      const gradient = layer.ctx.createRadialGradient(radius, radius, 0, radius, radius, radius);
+      gradient.addColorStop(0, color); gradient.addColorStop(1, "rgba(0,0,0,0)");
+      layer.ctx.fillStyle = gradient; layer.ctx.fillRect(0, 0, layer.image.width, layer.image.height);
+      sprite = layer.image;
+      if (glowCache.size >= GLOW_CACHE_LIMIT) glowCache.delete(glowCache.keys().next().value);
+      glowCache.set(key, sprite);
+    }
+    return sprite;
+  }
+  function drawGlow(ctx, x, y, radius, color = "rgba(248,198,119,.22)", additive = false) {
+    if (!ctx || ![x, y, radius].every(Number.isFinite) || radius <= 0 || radius > 256) return;
+    const tint = glowTint(color);
+    const sprite = glowSprite(radius, tint.color);
+    ctx.save();
+    if (additive) ctx.globalCompositeOperation = "lighter";
+    if (sprite) {
+      ctx.globalAlpha *= tint.alpha;
+      ctx.drawImage(sprite, Math.floor(x - radius), Math.floor(y - radius));
+    } else {
+      // Geometry-only contexts do not have a Canvas image factory.
+      const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
+      gradient.addColorStop(0, color); gradient.addColorStop(1, "rgba(248,198,119,0)");
+      box(ctx, x - radius, y - radius, radius * 2, radius * 2, gradient);
+    }
+    ctx.restore();
   }
   function lamp(ctx, x, floor, time, height = 78) {
     const y = floor - height;
@@ -224,15 +267,79 @@
       if (d) draw(screen, i, d, world);
     }
   }
+  function paintSky(ctx, p) {
+    const sky = ctx.createLinearGradient(0, 0, 0, 568);
+    sky.addColorStop(0, p.sky); sky.addColorStop(.7, p.haze); sky.addColorStop(1, p.sky);
+    box(ctx, 0, 0, W, H, sky);
+  }
+  function paintMoon(ctx, x, y, p) {
+    glow(ctx, x, y, MOON_RADIUS, "rgba(207,220,230,.10)");
+    oval(ctx, x, y, 32, 32, "#d7d7c8"); oval(ctx, x - 12, y - 9, 29, 29, p.sky);
+  }
+  function paintFarShoreTile(ctx, x, seed, d) {
+    if (d.id === "fener" || d.id === "dalgakiran") {
+      poly(ctx, [[x - 40, 526], [x + 16, 463], [x + 102, 433 + noise(seed) * 35], [x + 210, 476], [x + 290, 526]], "#293f50");
+    } else {
+      for (let i = 0; i < 4; i++) {
+        const h = 40 + noise(seed * 4 + i) * 92, xx = x + i * 58;
+        box(ctx, xx, 513 - h, 48, h, "#263c48");
+        poly(ctx, [[xx - 3, 513 - h], [xx + 24, 501 - h], [xx + 50, 513 - h]], "#233744");
+        for (let k = 0; k < 3; k++) box(ctx, xx + 8 + k * 12, 529 - h, 3, 5, "rgba(202,181,128,.26)");
+      }
+    }
+  }
+  function makeLayer(width, height, opaque = false) {
+    const image = document.createElement("canvas");
+    image.width = width; image.height = height;
+    const ctx = image.getContext("2d", { alpha: !opaque });
+    return ctx ? { image, ctx } : null;
+  }
+  function paintShoreStrip(layer, origin) {
+    const ctx = layer.ctx, offset = 460 * (1 - SHORE_FACTOR);
+    ctx.clearRect(0, 0, layer.image.width, layer.image.height);
+    ctx.save(); ctx.translate(-origin, -SHORE_TOP);
+    const first = Math.floor((origin - offset - 340) / (SHORE_FACTOR * SHORE_STEP));
+    const last = Math.ceil((origin + layer.image.width - offset + 340) / (SHORE_FACTOR * SHORE_STEP));
+    for (let i = first; i <= last; i++) {
+      const world = i * SHORE_STEP, d = districtAt(world);
+      if (d) paintFarShoreTile(ctx, world * SHORE_FACTOR + offset, i, d);
+    }
+    ctx.restore();
+  }
+  function getStaticLayers(ctx, cam, focus) {
+    // Headless geometry checks and contexts without an offscreen canvas keep the direct path.
+    if (!globalThis.document?.createElement) return null;
+    let layers = staticLayers.get(ctx);
+    if (!layers) {
+      const sky = makeLayer(W, H, true), moon = makeLayer(MOON_RADIUS * 2, MOON_RADIUS * 2);
+      const shore = makeLayer(SHORE_TILE_WIDTH * 2, SHORE_HEIGHT);
+      if (!sky || !moon || !shore) return null;
+      layers = { sky, moon, shore, paletteKey: null, origin: null };
+      staticLayers.set(ctx, layers);
+    }
+    const p = paletteAt(focus, true), key = `${p.sky}|${p.haze}`;
+    if (layers.paletteKey !== key) {
+      paintSky(layers.sky.ctx, p);
+      layers.moon.ctx.clearRect(0, 0, MOON_RADIUS * 2, MOON_RADIUS * 2);
+      paintMoon(layers.moon.ctx, MOON_RADIUS, MOON_RADIUS, p);
+      layers.paletteKey = key;
+    }
+    const origin = Math.floor(cam * SHORE_FACTOR / SHORE_TILE_WIDTH) * SHORE_TILE_WIDTH;
+    if (layers.origin !== origin) {
+      paintShoreStrip(layers.shore, origin);
+      layers.origin = origin;
+    }
+    return layers;
+  }
   function drawBackground(ctx, cameraX, time, focusX = cameraX + 460) {
     if (!ctx) return;
     const cam = camera(cameraX), t = clock(time), focus = clamp(finite(focusX, cam + 460), 0, END);
     const p = paletteAt(focus);
+    const layers = getStaticLayers(ctx, cam, focus);
     ctx.save(); ctx.lineJoin = "round"; ctx.lineCap = "round";
     ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip();
-    const sky = ctx.createLinearGradient(0, 0, 0, 568);
-    sky.addColorStop(0, p.sky); sky.addColorStop(.7, p.haze); sky.addColorStop(1, p.sky);
-    box(ctx, 0, 0, W, H, sky);
+    if (layers) ctx.drawImage(layers.sky.image, 0, 0);
+    else paintSky(ctx, p);
     for (let i = 0; i < 68; i++) {
       const x = mod(i * 173.7 - cam * .025, W), y = 25 + noise(i) * 230;
       ctx.globalAlpha = .18 + noise(i + 12) * .45 + Math.sin(t * .7 + i) * .06;
@@ -240,8 +347,8 @@
     }
     ctx.globalAlpha = 1;
     const moonX = 1030 - cam * .008;
-    glow(ctx, moonX, 113, 108, "rgba(207,220,230,.10)");
-    oval(ctx, moonX, 113, 32, 32, "#d7d7c8"); oval(ctx, moonX - 12, 104, 29, 29, p.sky);
+    if (layers) ctx.drawImage(layers.moon.image, Math.floor(moonX - MOON_RADIUS), 113 - MOON_RADIUS);
+    else paintMoon(ctx, moonX, 113, p);
     // Long, translucent banks of cloud move independently of the shoreline.
     for (let i = 0; i < 5; i++) {
       const x = mod(i * 347 - cam * .065 + t * 2, 1730) - 230;
@@ -249,18 +356,8 @@
       oval(ctx, x + 87, 188 + i % 2 * 49, 89, 12, "rgba(143,162,180,.035)");
     }
     // Far shore: inland rooflines fade into hills toward the open sea.
-    tiles(ctx, cam, .22, 290, 180, (x, seed, d) => {
-      if (d.id === "fener" || d.id === "dalgakiran") {
-        poly(ctx, [[x - 40, 526], [x + 16, 463], [x + 102, 433 + noise(seed) * 35], [x + 210, 476], [x + 290, 526]], "#293f50");
-      } else {
-        for (let i = 0; i < 4; i++) {
-          const h = 40 + noise(seed * 4 + i) * 92, xx = x + i * 58;
-          box(ctx, xx, 513 - h, 48, h, "#263c48");
-          poly(ctx, [[xx - 3, 513 - h], [xx + 24, 501 - h], [xx + 50, 513 - h]], "#233744");
-          for (let k = 0; k < 3; k++) box(ctx, xx + 8 + k * 12, 529 - h, 3, 5, "rgba(202,181,128,.26)");
-        }
-      }
-    });
+    if (layers) ctx.drawImage(layers.shore.image, Math.floor(layers.origin - cam * SHORE_FACTOR), SHORE_TOP);
+    else tiles(ctx, cam, SHORE_FACTOR, SHORE_STEP, 180, (x, seed, d) => paintFarShoreTile(ctx, x, seed, d));
     const water = ctx.createLinearGradient(0, 553, 0, H);
     water.addColorStop(0, p.water); water.addColorStop(1, "#0a1d2c");
     box(ctx, 0, 553, W, H - 553, water);
@@ -313,14 +410,18 @@
       }
     });
     // Water has bounded screen-space work even at extreme camera coordinates.
+    const waterSoft = new Path2D(), waterBright = new Path2D();
     for (let row = 0; row < 9; row++) {
-      const y = 562 + row * 19;
+      const y = 562 + row * 19, path = row % 3 ? waterSoft : waterBright;
       for (let i = 0; i < 29; i++) {
         const x = mod(i * 49 - cam * (.35 + row * .02) + Math.sin(t + row) * 7, W + 70) - 35;
-        line(ctx, x, y + Math.sin(t * .9 + i + row) * 2, x + 10 + noise(i + row) * 23, y,
-          row % 3 ? "rgba(133,174,187,.13)" : "rgba(160,188,198,.20)");
+        path.moveTo(x, y + Math.sin(t * .9 + i + row) * 2);
+        path.lineTo(x + 10 + noise(i + row) * 23, y);
       }
     }
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(133,174,187,.13)"; ctx.stroke(waterSoft);
+    ctx.strokeStyle = "rgba(160,188,198,.20)"; ctx.stroke(waterBright);
     tiles(ctx, cam, .84, 260, 130, (x, seed, d) => {
       if (d.id === "dalgakiran" || d.id === "fener") {
         rocks(ctx, x, 616, seed + 35, 7, 31);
@@ -657,5 +758,5 @@
     text(ctx, "3 km", 1004, 573, 11, "#465f63");
     ctx.restore();
   }
-  globalThis.HarborWorld = Object.freeze({ districts, docks, districtAt, drawBackground, drawDock, drawNPC, drawMap });
+  globalThis.HarborWorld = Object.freeze({ districts, docks, districtAt, drawBackground, drawDock, drawNPC, drawMap, drawGlow });
 })();

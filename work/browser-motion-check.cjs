@@ -29,6 +29,7 @@ const { launchBrave } = require("./browser-launch.cjs");
   await page.waitForTimeout(180);
   assert.equal(await page.locator("#game").evaluate(canvas => canvas.toDataURL()), first, "Paused animation must freeze");
   await page.locator("#resume-button").click();
+  await page.locator("#pause-screen").waitFor({ state: "hidden" });
   assert.equal(await page.locator("#pause-screen").isVisible(), false);
   assert.equal(await page.locator("#touch-controls").isVisible(), false);
 
@@ -48,6 +49,75 @@ const { launchBrave } = require("./browser-launch.cjs");
 
   await page.goto(url + "/work/browser-playtest.html");
   await page.evaluate(() => window.__playtest.resetRun(0));
+  const trauma = await page.evaluate(() => {
+    const g = window.__playtest, canvas = document.querySelector("#game"), ctx = canvas.getContext("2d");
+    const bodyBefore = JSON.stringify(g.player), translations = [], translate = ctx.translate.bind(ctx);
+    ctx.translate = (x, y) => { translations.push([x, y]); translate(x, y); };
+    g.effects.reset(); g.effects.burst("hurt", g.player.x, g.player.y);
+    const active = g.effects.offset(), fxBefore = JSON.stringify(g.effects);
+    try {
+      g.draw(0); const activeApplied = translations.some(([x, y]) => x === active.x && y === active.y);
+      const pure = fxBefore === JSON.stringify(g.effects);
+      g.effects.reduced = true; translations.length = 0; g.draw(0);
+      return { activeApplied, pure, reduced: g.effects.offset(), playerUnchanged: bodyBefore === JSON.stringify(g.player) };
+    } finally { ctx.translate = translate; g.resetRun(0); }
+  });
+  assert.equal(trauma.activeApplied, true);
+  assert.equal(trauma.pure, true);
+  assert.deepEqual(trauma.reduced, { x: 0, y: 0 });
+  assert.equal(trauma.playerUnchanged, true);
+  const rope = await page.evaluate(() => {
+    const g = window.__playtest, ctx = document.querySelector("#game").getContext("2d");
+    g.resetRun(0); if (g.effects.reduced) document.querySelector("#motion-toggle").click();
+    g.beginTether(); for (let i = 0; i < 30; i++) g.update(1 / 120);
+    g.setCamera(0);
+    const hand = g.visualHand(g.rendered.x, g.rendered.y, g.renderAlpha()), anchor = g.tetherAnchor();
+    const moves = [], curves = [], moveTo = ctx.moveTo.bind(ctx), quadratic = ctx.quadraticCurveTo.bind(ctx);
+    ctx.moveTo = (...args) => { moves.push(args); moveTo(...args); };
+    ctx.quadraticCurveTo = (...args) => { curves.push(args); quadratic(...args); };
+    const before = JSON.stringify({ player: g.player, rope: g.visualRope });
+    try {
+      g.drawRope(g.nearestAnchor());
+      const pure = before === JSON.stringify({ player: g.player, rope: g.visualRope });
+      const fullCurves = curves.length, start = moves[0], end = curves.at(-1).slice(2);
+      document.querySelector("#motion-toggle").click(); curves.length = 0; g.drawRope(g.nearestAnchor());
+      const reducedCurves = curves.length;
+      document.querySelector("#motion-toggle").click(); g.update(1 / 120); g.draw(0);
+      return { pure, fullCurves, reducedCurves, start, end, hand, anchor: { x: anchor.x, y: anchor.y } };
+    } finally { ctx.moveTo = moveTo; ctx.quadraticCurveTo = quadratic; }
+  });
+  assert.equal(rope.pure, true); assert.equal(rope.fullCurves, 11); assert.equal(rope.reducedCurves, 1);
+  assert.deepEqual(rope.start, [rope.hand.x, rope.hand.y]);
+  assert.deepEqual(rope.end, [rope.anchor.x, rope.anchor.y]);
+  await page.screenshot({ path: path.join(output, "rope-attached.png") });
+  const release = await page.evaluate(() => {
+    const g = window.__playtest; g.releaseTether({ award: false }); g.update(1 / 120); g.syncVisualPosition(); g.draw(0);
+    return g.visualRopeState();
+  });
+  assert.ok(release.release > 0);
+  await page.screenshot({ path: path.join(output, "rope-release.png") });
+  const squash = await page.evaluate(() => {
+    const g = window.__playtest, ctx = document.querySelector("#game").getContext("2d");
+    g.resetRun(0); g.beginTether(); for (let i = 0; i < 8; i++) g.update(1 / 120); g.setCamera(0);
+    const scales = [], scale = ctx.scale.bind(ctx), beforeTransform = ctx.getTransform().toFloat64Array();
+    ctx.scale = (x, y) => { scales.push([x, y]); scale(x, y); };
+    const before = JSON.stringify({ body: g.player, spring: g.squash, rig: g.courier.snapshot() });
+    try {
+      const s = g.squashValue(g.renderAlpha()); g.drawPlayer();
+      const applied = scales.some(([x, y]) => x === 1 - s * .6 && y === 1 + s);
+      const restored = JSON.stringify(Array.from(beforeTransform)) === JSON.stringify(Array.from(ctx.getTransform().toFloat64Array()));
+      const pure = before === JSON.stringify({ body: g.player, spring: g.squash, rig: g.courier.snapshot() });
+      document.querySelector("#motion-toggle").click(); scales.length = 0; g.drawPlayer();
+      const reduced = scales.every(([x, y]) => x === 1 && y === 1);
+      document.querySelector("#motion-toggle").click(); g.resetRun(0); g.beginTether();
+      for (let i = 0; i < 8; i++) g.update(1 / 120);
+      g.syncVisualPosition(); g.draw(0);
+      return { applied, restored, pure, reduced, s };
+    } finally { ctx.scale = scale; }
+  });
+  assert.ok(squash.s < 0); assert.equal(squash.applied, true); assert.equal(squash.restored, true);
+  assert.equal(squash.pure, true); assert.equal(squash.reduced, true);
+  await page.screenshot({ path: path.join(output, "courier-squash.png") });
   const route = await page.evaluate(() => {
     const g = window.__playtest;
     g.resetRun(-1);

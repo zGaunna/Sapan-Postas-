@@ -2,6 +2,33 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   "use strict";
 
   const options = gameOptions ?? {};
+  class FrameMeter {
+    constructor(size = 240) {
+      this.buf = new Float32Array(size);
+      this.i = 0;
+      this.filled = 0;
+      this.last = null;
+    }
+    tick(ts) {
+      if (this.last !== null) {
+        this.buf[this.i] = ts - this.last;
+        this.i = (this.i + 1) % this.buf.length;
+        this.filled = Math.min(this.filled + 1, this.buf.length);
+      }
+      this.last = ts;
+    }
+    stats() {
+      const a = Array.from(this.buf.subarray(0, this.filled)).sort((x, y) => x - y);
+      const q = p => a[Math.min(a.length - 1, Math.floor(a.length * p))] || 0;
+      return { p50: q(.5), p95: q(.95), p99: q(.99), max: a[a.length - 1] || 0 };
+    }
+  }
+  const perfEnabled = !!globalThis.location && new URLSearchParams(globalThis.location.search).has("perf");
+  const meter = perfEnabled ? new FrameMeter() : null;
+  const perfReadout = document.querySelector("#perf-readout");
+  const PERF_REFRESH_MS = 250;
+  let lastPerfRefresh = null;
+  perfReadout.hidden = !perfEnabled;
   const W = 1280;
   const H = 720;
   const ROUTE_END = 17400;
@@ -17,6 +44,12 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   const FRAGILE_HOLD_SECONDS = 1.55;
   const WINCH_REEL_SPEED = 135;
   const PHYSICS_DT = 1 / 120;
+  const ANCHOR_GLOW_RADIUS = 18, SEAL_GLOW_RADIUS = 36, HAZARD_GLOW_RADIUS = 36, DOCK_GLOW_RADIUS = 24;
+  const CAMERA_RATE = 5, CAMERA_LOOK_AHEAD_SECONDS = .16;
+  const CAMERA_LOOK_BACK_MAX = 60, CAMERA_LOOK_AHEAD_MAX = 140;
+  const damp = (a, b, rate, dt) => b + (a - b) * Math.exp(-rate * dt);
+  const cameraTarget = (x, vx, framing) => Math.max(0, x - W * framing
+    + Math.max(-CAMERA_LOOK_BACK_MAX, Math.min(CAMERA_LOOK_AHEAD_MAX, vx * CAMERA_LOOK_AHEAD_SECONDS)));
   const BEST_TIME_KEY = "sapan-postasi-best-time";
   const DELIVERY_TIME_KEY = "sapan-postasi-best-time-full";
   const canvas = document.querySelector("#game");
@@ -43,6 +76,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     resultScoreLabel: document.querySelector("#result-score-label"),
     finalHits: document.querySelector("#final-hits"), finalThrows: document.querySelector("#final-throws"),
     runTime: document.querySelector("#run-time"), finalTime: document.querySelector("#final-time"),
+    finalTimeCount: document.querySelector("#final-time-count"),
     bestTimeStart: document.querySelector("#best-time-start"), bestTimeResult: document.querySelector("#best-time-result"),
     deliveryTimeStart: document.querySelector("#delivery-time-start"), deliveryTimeResult: document.querySelector("#delivery-time-result"),
     newDeliveryBest: document.querySelector("#new-delivery-best"), resultSealMarks: document.querySelector("#result-seal-marks"),
@@ -189,6 +223,12 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   const player = { x: 165, y: 420, vx: 155, vy: -160, radius: 17 };
   const courier = new CourierRig();
   const effects = new MotionFX();
+  const visualRope = new MotionFX.VerletRope();
+  const squash = new MotionFX.Spring();
+  const SQUASH_LIMIT = .2, SQUASH_ATTACH = -2, SQUASH_RELEASE = 3, SQUASH_HIT = -3;
+  let squashAccumulator = 0;
+  const ROPE_RELEASE_SECONDS = .16, ROPE_RELEASE_IMPULSE = 60;
+  let visualRopeAnchor = null, visualRopeRelease = 0, visualRopeAccumulator = 0, visualRopeReleaseLength = 0;
   const previous = { x: player.x, y: player.y, camera: cameraX };
   const rendered = { x: player.x, y: player.y };
   let viewX = 0;
@@ -241,9 +281,58 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     effects.clearTrail();
   }
 
+  function resetVisualRope(anchor) {
+    const hand = visualHand(player.x, player.y);
+    visualRope.reset(hand.x, hand.y, anchor.x, anchor.y);
+    visualRopeAnchor = anchor; visualRopeRelease = 0; visualRopeAccumulator = 0;
+  }
+
+  function updateVisualRope(dt) {
+    if (motionReduced) { visualRopeAnchor = null; visualRopeRelease = 0; visualRopeAccumulator = 0; return; }
+    if (tetherAnchor && visualRopeAnchor !== tetherAnchor) resetVisualRope(tetherAnchor);
+    if (!visualRopeAnchor) return;
+    visualRopeAccumulator += dt;
+    const hand = visualHand(player.x, player.y);
+    while (visualRopeAccumulator >= PHYSICS_DT - 1e-9) {
+      const length = tetherAnchor ? ropeLength : visualRopeReleaseLength;
+      visualRope.step(PHYSICS_DT, hand.x, hand.y, visualRopeAnchor.x, visualRopeAnchor.y, length);
+      visualRopeAccumulator = Math.max(0, visualRopeAccumulator - PHYSICS_DT);
+      if (!tetherAnchor) {
+        visualRopeRelease = Math.max(0, visualRopeRelease - PHYSICS_DT);
+        if (!visualRopeRelease) { visualRopeAnchor = null; visualRopeAccumulator = 0; break; }
+      }
+    }
+  }
+
   function motionEvent(kind, x = player.x, y = player.y, strength = 1) {
     courier.event(kind, strength);
     effects.burst(kind, x, y, player.vx, player.vy, strength);
+    if (!motionReduced) {
+      if (kind === "attach") squash.kick(SQUASH_ATTACH);
+      else if (kind === "release") squash.kick(SQUASH_RELEASE);
+      else if (kind === "hurt" || kind === "water") squash.kick(SQUASH_HIT);
+    }
+  }
+
+  function resetSquash() { squash.reset(); squashAccumulator = 0; }
+
+  function updateSquash(dt) {
+    if (motionReduced) return;
+    squashAccumulator += dt;
+    while (squashAccumulator >= PHYSICS_DT - 1e-9) {
+      squash.update(PHYSICS_DT);
+      squashAccumulator = Math.max(0, squashAccumulator - PHYSICS_DT);
+    }
+  }
+
+  function squashValue(alpha = 1) {
+    if (motionReduced) return 0;
+    return Math.max(-SQUASH_LIMIT, Math.min(SQUASH_LIMIT, squash.previous + (squash.x - squash.previous) * alpha));
+  }
+
+  function visualHand(x, y, alpha = 1) {
+    const hand = courier.attachment(x, y), s = squashValue(alpha);
+    return { x: x + (hand.x - x) * (1 - s * .6), y: y + (hand.y - y) * (1 + s) };
   }
 
   function readBest() {
@@ -372,6 +461,11 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     socialUI.dialogue.hidden = !conversation || !machine.is(states.exploring);
     socialUI.map.hidden = !machine.is(states.map);
     document.querySelector("#voyage-log").hidden = !machine.is(states.history);
+    for (const panel of [ui.start, ui.pause, ui.result, socialUI.map, document.querySelector("#voyage-log")]) {
+      // Exit transitions may keep a hidden panel painted briefly; input stops immediately.
+      panel.inert = panel.hidden;
+    }
+    if (ui.result.hidden) stopResultCount();
     socialUI.invite.hidden = !machine.is(states.playing) || !nearbyDock();
     document.querySelector("#restart-button").textContent = machine.is(states.paused) && pauseOrigin === states.exploring ? "İskele girişine dön" : "Baştan başla";
     updateReleaseCue();
@@ -411,6 +505,8 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
 
   function enterPlaying(context) {
     if (context.kind !== "reset") { enterRestoredState(context); return; }
+    resetSquash();
+    visualRopeAnchor = null; visualRopeRelease = 0; visualRopeAccumulator = 0;
     effects.reset(); effects.reduced = motionReduced; ropePulse = 0;
     syncVisualPosition(); courier.reset(poseInput());
     resetFrameClock();
@@ -539,11 +635,11 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
 
   function renderResultSplits(result) {
     let previousSplit = 0;
-    ui.splits.innerHTML = result.splits.map(split => {
+    ui.splits.innerHTML = result.splits.map((split, index) => {
       const displayedSplit = Math.floor(split.at * 100 + 1e-9);
       const duration = (displayedSplit - previousSplit) / 100;
       previousSplit = displayedSplit;
-      return `<li><span>${escapeHtml(split.name)}</span><b>${escapeHtml(formatRunTime(split.at))}</b><small>+${escapeHtml(formatRunTime(duration))}</small></li>`;
+      return `<li style="--entry-order:${index}"><span>${escapeHtml(split.name)}</span><b>${escapeHtml(formatRunTime(split.at))}</b><small>+${escapeHtml(formatRunTime(duration))}</small></li>`;
     }).join("");
     ui.splits.hidden = result.splits.length === 0 || Boolean(result.targetPractice);
   }
@@ -564,6 +660,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     ui.finalHits.textContent = String(result.hits);
     ui.finalThrows.textContent = String(result.cleanThrows);
     ui.finalTime.textContent = formatRunTime(result.runTime);
+    startResultCount(result.runTime);
     ui.bestTimeStart.textContent = formatRunTime(records.bestTime);
     ui.bestTimeResult.textContent = formatRunTime(records.bestTime);
     ui.newTimeBest.hidden = !records.timeRecord;
@@ -615,6 +712,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     } else if (context.kind === "harbor-return") {
       savedFlight = null;
       courier.reset(poseInput()); resetFrameClock(); setPanels(); updateHud(true);
+      if (tetherAnchor && !motionReduced) resetVisualRope(tetherAnchor);
     }
   }
 
@@ -654,6 +752,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
 
   function enterExploring(context) {
     if (context.kind !== "harbor") { enterRestoredState(context); return; }
+    resetSquash();
     const dock = socialDock;
     keys.clear(); recoveryBlockedKeys.clear();
     player.x = dock.id === "rihtim" ? 170 : dock.x - 120;
@@ -698,8 +797,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     player.x = Math.max(socialDock.left + 20, Math.min(socialDock.right - 20, player.x + player.vx * dt));
     if (player.x === socialDock.left + 20 || player.x === socialDock.right - 20) player.vx = 0;
     player.y = socialDock.floor - 28; player.vy = 0;
-    const targetCamera = Math.max(0, player.x - W * 0.45);
-    cameraX += (targetCamera - cameraX) * (1 - Math.exp(-5 * dt));
+    cameraX = damp(cameraX, cameraTarget(player.x, player.vx, .45), CAMERA_RATE, dt);
     courier.update(dt, poseInput(dt > 0 ? (player.vx - oldVX) / dt : 0, 0));
     effects.update(dt, null, 0, false);
     if (Math.abs(player.vx) > 60) {
@@ -820,6 +918,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     score += 10;
     ropePulse = 1;
     motionEvent("attach", tetherAnchor.x, tetherAnchor.y);
+    if (!motionReduced) resetVisualRope(tetherAnchor);
     playTone(430, 0.055, "sine");
     updateHud(true);
   }
@@ -885,6 +984,11 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
         playTone(330, 0.045, "sine");
       }
     }
+    if (tetherAnchor && consumeAnchor && !motionReduced) {
+      if (visualRopeAnchor !== tetherAnchor) resetVisualRope(tetherAnchor);
+      visualRopeReleaseLength = ropeLength; visualRopeRelease = ROPE_RELEASE_SECONDS;
+      visualRope.kick((Math.sign(player.vx) || 1) * ROPE_RELEASE_IMPULSE, PHYSICS_DT);
+    } else { visualRopeAnchor = null; visualRopeRelease = 0; visualRopeAccumulator = 0; }
     tetherAnchor = null;
     ropeLength = 0;
     ropeLengthRate = 0;
@@ -1103,7 +1207,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
       limitRopeSpeed(player, tetherAnchor, ropeLengthRate);
     }
 
-    cameraX += (Math.max(0, player.x - W * 0.36) - cameraX) * Math.min(1, dt * 4.5);
+    cameraX = damp(cameraX, cameraTarget(player.x, player.vx, .36), CAMERA_RATE, dt);
 
     for (let i = 0; i < seals.length; i += 1) {
       const seal = seals[i];
@@ -1170,6 +1274,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     if (!recoveryReady) {
       courier.update(dt, poseInput(dt > 0 ? (player.vx - oldVX) / dt : 0, dt > 0 ? (player.vy - oldVY) / dt : 0));
       effects.update(dt, player, boostTime, machine.is(states.playing));
+      if (machine.is(states.playing)) { updateSquash(dt); updateVisualRope(dt); }
       ropePulse = Math.max(0, ropePulse - dt * 2.7);
     }
   }
@@ -1374,20 +1479,20 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     ctx.fillStyle = "#345258"; ctx.fillRect(x - 4, anchor.y - 24, 8, 9); ctx.restore();
     ctx.save();
     ctx.translate(x, anchor.y);
+    if (selected || latched) {
+      const color = fragile ? "rgba(255,143,119,.55)" : winch ? "rgba(255,195,107,.55)" : "rgba(85,214,207,.55)";
+      HarborWorld.drawGlow(ctx, 0, 0, ANCHOR_GLOW_RADIUS, color, true);
+    }
     ctx.strokeStyle = anchor.visited ? "rgba(143,169,161,.22)" : selected || latched ? accent : fragile ? "rgba(255,143,119,.65)" : winch ? "rgba(255,195,107,.68)" : "rgba(125,173,169,.45)";
     ctx.lineWidth = selected || latched ? 3 : 2;
-    ctx.shadowColor = selected || latched ? accent : "transparent";
-    ctx.shadowBlur = selected || latched ? 18 : 0;
     ctx.beginPath(); ctx.ellipse(0, 0, 19, 14, 0, 0, Math.PI * 2); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(-28, -2); ctx.lineTo(-17, -2); ctx.moveTo(17, -2); ctx.lineTo(28, -2); ctx.stroke();
     if (!anchor.visited && fragile) {
-      ctx.shadowBlur = 0;
       ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(-5, -12); ctx.lineTo(1, -3); ctx.lineTo(-3, 4);
       ctx.moveTo(8, -10); ctx.lineTo(3, 0); ctx.lineTo(8, 9); ctx.stroke();
     }
     if (!anchor.visited && winch) {
-      ctx.shadowBlur = 0;
       ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(-6, -7); ctx.lineTo(0, -2); ctx.lineTo(6, -7);
       ctx.moveTo(-6, 1); ctx.lineTo(0, 6); ctx.lineTo(6, 1); ctx.stroke();
@@ -1422,7 +1527,6 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
       ctx.beginPath(); ctx.moveTo(0, 17); ctx.lineTo(0, 44); ctx.stroke();
     }
     if (!anchor.visited && (fragile || winch)) {
-      ctx.shadowBlur = 0;
       ctx.fillStyle = accent;
       ctx.font = "800 9px Segoe UI, sans-serif";
       ctx.textAlign = "center";
@@ -1430,7 +1534,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     }
     const routeSeal = seals.find(seal => seal.approachRing === anchor.id && getSealStatus(seal) === "waiting");
     if (routeSeal && (!anchor.visited || latched)) {
-      ctx.shadowBlur = 0; ctx.fillStyle = "#ffc36b";
+      ctx.fillStyle = "#ffc36b";
       ctx.font = "800 9px Segoe UI, sans-serif"; ctx.textAlign = "center";
       ctx.fillText(`${routeSeal.id}. MÜHÜR ${routeSeal.y > anchor.y + 80 ? "↓" : "→"}`, 0, -44);
     }
@@ -1443,10 +1547,10 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     if (x < -50 || x > W + 50) return;
     const y = seal.y + Math.sin(time * 2.4 + seal.x) * 5;
     ctx.save(); ctx.translate(x, y); ctx.rotate(Math.sin(time + seal.x) * 0.04);
-    ctx.shadowColor = "rgba(255,195,107,.62)"; ctx.shadowBlur = 20;
+    HarborWorld.drawGlow(ctx, 0, 0, SEAL_GLOW_RADIUS, "rgba(255,195,107,.62)", true);
     ctx.fillStyle = "#ffc36b";
     ctx.beginPath(); ctx.roundRect(-15, -19, 30, 38, 5); ctx.fill();
-    ctx.shadowBlur = 0; ctx.strokeStyle = "#684b2c"; ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "#684b2c"; ctx.lineWidth = 1.5;
     ctx.strokeRect(-9, -12, 18, 24);
     ctx.fillStyle = "#684b2c"; ctx.font = "bold 10px Segoe UI"; ctx.textAlign = "center";
     ctx.fillText(String(seal.id), 0, 4);
@@ -1477,10 +1581,10 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     ctx.save(); ctx.translate(x, pos.y);
     ctx.strokeStyle = "rgba(255,107,107,.35)"; ctx.setLineDash([4, 5]);
     ctx.beginPath(); ctx.arc(0, 0, hazard.r + 12, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
-    ctx.shadowColor = "rgba(255,107,107,.48)"; ctx.shadowBlur = 16;
+    HarborWorld.drawGlow(ctx, 0, 0, HAZARD_GLOW_RADIUS, "rgba(255,107,107,.48)", true);
     ctx.fillStyle = "#bc5b58";
     ctx.beginPath(); ctx.arc(0, 0, hazard.r * 0.72, 0, Math.PI * 2); ctx.fill();
-    ctx.shadowBlur = 0; ctx.strokeStyle = "#f7a27f"; ctx.lineWidth = 2;
+    ctx.strokeStyle = "#f7a27f"; ctx.lineWidth = 2;
     for (let i = 0; i < 8; i += 1) {
       const angle = i * Math.PI / 4 + time * 0.1;
       ctx.beginPath();
@@ -1495,18 +1599,24 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     ctx.save();
     if (invulnerable > 0) ctx.globalAlpha = 0.68 + Math.sin(visualTime * 24) * 0.18;
     if (machine.is(states.menu)) courier.draw(ctx, 955, 436, 2.3);
-    else courier.draw(ctx, rendered.x - viewX, rendered.y);
+    else {
+      const px = rendered.x - viewX, py = rendered.y, s = squashValue(renderAlpha);
+      ctx.translate(px, py); ctx.scale(1 - s * .6, 1 + s); ctx.translate(-px, -py);
+      courier.draw(ctx, px, py);
+    }
     ctx.restore();
   }
 
   function drawRope(target) {
-    const hand = courier.attachment(rendered.x, rendered.y);
-    const end = tetherAnchor || target?.anchor;
+    const hand = visualHand(rendered.x, rendered.y, renderAlpha);
+    const end = tetherAnchor || (!motionReduced && visualRopeRelease > 0 ? visualRopeAnchor : target?.anchor);
     if (!end) return;
     ctx.save();
     const hx = hand.x - viewX, hy = hand.y;
     const ex = end.x - viewX, ey = end.y;
-    if (tetherAnchor) {
+    if (!motionReduced && visualRopeAnchor === end && (tetherAnchor || visualRopeRelease > 0)) {
+      drawVerletRope(hand, end);
+    } else if (tetherAnchor) {
       const distance = Math.hypot(end.x - rendered.x, end.y - rendered.y);
       const slack = Math.max(0, ropeLength - distance);
       const sag = Math.min(52, slack * 0.44);
@@ -1533,6 +1643,24 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
       ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(ex, ey); ctx.stroke();
     }
     ctx.restore();
+  }
+
+  function drawVerletRope(hand, end) {
+    const alpha = Math.min(1, visualRopeAccumulator / PHYSICS_DT + renderAlpha);
+    if (!tetherAnchor) ctx.globalAlpha = visualRopeRelease / ROPE_RELEASE_SECONDS;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "rgba(3,15,22,.7)"; ctx.lineWidth = 4;
+    visualRope.path(ctx, viewX, alpha, hand.x, hand.y, end.x, end.y); ctx.stroke();
+    ctx.strokeStyle = tetherAnchor?.type === "fragile" && FRAGILE_HOLD_SECONDS - tetherTime < .35 ? "#ff9f83" : "#c2ddd0";
+    ctx.lineWidth = 1.65; ctx.stroke();
+    if (ropePulse > 0 && tetherAnchor) {
+      const position = (visualRope.n - 1) * ropePulse;
+      const i = Math.min(visualRope.n - 2, Math.floor(position)), t = position - i;
+      const x = visualRope.atX(i, alpha) * (1 - t) + visualRope.atX(i + 1, alpha) * t - viewX;
+      const y = visualRope.atY(i, alpha) * (1 - t) + visualRope.atY(i + 1, alpha) * t;
+      ctx.globalAlpha = ropePulse; ctx.fillStyle = "#fff1bf";
+      ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fill();
+    }
   }
 
   // Predict with the same fixed step as live physics so the guide matches the flight.
@@ -1658,8 +1786,8 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
       ctx.fillStyle = "#56645a"; ctx.fillRect(dockX - 12, 436, 304, 8);
       ctx.fillStyle = "#d6bd8c"; ctx.fillRect(dockX + 208, 318, 9, 118);
       ctx.fillStyle = "#1c343b"; ctx.fillRect(dockX + 196, 298, 33, 26);
-      ctx.fillStyle = "#ffc36b"; ctx.shadowColor = "#ffc36b"; ctx.shadowBlur = 16;
-      ctx.fillRect(dockX + 208, 305, 9, 11); ctx.shadowBlur = 0;
+      HarborWorld.drawGlow(ctx, dockX + 212.5, 310.5, DOCK_GLOW_RADIUS, "rgba(255,195,107,.75)", true);
+      ctx.fillStyle = "#ffc36b"; ctx.fillRect(dockX + 208, 305, 9, 11);
     }
     drawReleasePreview();
     effects.draw(ctx, viewX);
@@ -1684,6 +1812,7 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   function updateIdleVisuals(dt) {
     courier.update(dt, poseInput());
     effects.update(dt, null, 0, false);
+    updateSquash(dt);
   }
 
   function draw(time) {
@@ -1737,7 +1866,42 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     syncVisualPosition();
   }
 
+  const RESULT_COUNT_MS = 550;
+  let resultCount = null;
+
+  function stopResultCount() {
+    resultCount = null;
+    ui.finalTime.classList.remove("is-counting");
+    ui.finalTimeCount.hidden = true;
+  }
+
+  function startResultCount(value) {
+    stopResultCount();
+    if (motionReduced || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches || value <= 0) return;
+    // Keep the final value accessible and stable; only the painted copy counts up.
+    resultCount = { value, start: null };
+    ui.finalTimeCount.textContent = formatRunTime(0);
+    ui.finalTimeCount.hidden = false;
+    ui.finalTime.classList.add("is-counting");
+  }
+
+  function updateResultCount(timestamp) {
+    if (!resultCount) return;
+    if (resultCount.start === null) resultCount.start = timestamp;
+    const progress = Math.max(0, Math.min(1, (timestamp - resultCount.start) / RESULT_COUNT_MS));
+    if (progress === 1) { stopResultCount(); return; }
+    ui.finalTimeCount.textContent = formatRunTime(resultCount.value * (1 - (1 - progress) ** 3));
+  }
+
   function frame(timestamp) {
+    updateResultCount(timestamp);
+    meter?.tick(timestamp);
+    // Sorting and DOM writes are throttled so the readout adds little measurement overhead.
+    if (meter && (lastPerfRefresh === null || timestamp - lastPerfRefresh >= PERF_REFRESH_MS)) {
+      const stats = meter.stats();
+      perfReadout.textContent = `Kare süresi · p95 ${stats.p95.toFixed(1)} ms · p99 ${stats.p99.toFixed(1)} ms`;
+      lastPerfRefresh = timestamp;
+    }
     if (!lastFrame) lastFrame = timestamp;
     const dt = Math.min(0.035, Math.max(0, (timestamp - lastFrame) / 1000));
     lastFrame = timestamp;
@@ -1763,6 +1927,9 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     if (!machine.is(states.playing) || !recoveryReady) return;
     recoveryReady = false;
     invulnerable = 2.1;
+    // Discard frame-timed waiting poses before restarting fixed-step rope endpoints.
+    resetSquash();
+    courier.reset(poseInput());
     courier.event("recover");
     resetFrameClock();
     updateHud(true);
@@ -1939,7 +2106,11 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
   });
   const motionButton = document.querySelector("#motion-toggle");
   function setMotionPreference() {
+    document.querySelector(".game-frame").dataset.motion = motionReduced ? "reduced" : "full";
+    if (motionReduced) stopResultCount();
     effects.reduced = motionReduced;
+    resetSquash();
+    visualRopeAnchor = null; visualRopeRelease = 0; visualRopeAccumulator = 0;
     motionButton.setAttribute("aria-pressed", String(!motionReduced));
     motionButton.title = motionReduced ? "Hareket efektlerini aç" : "Hareket efektlerini azalt";
   }
@@ -1972,6 +2143,9 @@ globalThis.SapanGame = Object.freeze({ create: function createGame(gameOptions) 
     elapsed: () => elapsed, invulnerable: () => invulnerable,
     getSealStatus, getSealLocator, drawSealLocator,
     setCamera: x => { cameraX = x; },
+    cameraX: () => cameraX, damp, cameraTarget,
+    visualRope, drawRope, visualRopeState: () => ({ anchorId: visualRopeAnchor?.id ?? null, release: visualRopeRelease }),
+    squash, updateSquash, squashValue, visualHand, drawPlayer,
     draw, syncVisualPosition, courier, effects, previous, rendered,
     renderAlpha: () => renderAlpha, visualTime: () => visualTime,
     enterHarbor, leaveHarbor, updateSocial, openConversation, chooseConversation, closeConversation, toggleMap, travelToDock,

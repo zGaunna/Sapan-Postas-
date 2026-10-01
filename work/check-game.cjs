@@ -54,6 +54,7 @@ function dispatchKeyUp(code) {
 }
 const storage = new Map([["sapan-postasi-best", "123"], ["sapan-postasi-tutorial", "done"]]);
 const context = {
+  Path2D: require("./path2d-stub.cjs"),
   __gameOptions: { testRun: true, debug: true, beforeStep: () => context.__beforeFrameStep?.() },
   document: {
     querySelector: selector => element(selector),
